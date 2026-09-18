@@ -17,7 +17,13 @@
  * request back to the asset server.
  */
 
-import { rateLimit, rateLimitReset, audit, sameOrigin } from "./security.js";
+import {
+  rateLimitCheck,
+  rateLimitFailure,
+  rateLimitReset,
+  audit,
+  sameOrigin,
+} from "./security.js";
 
 const DRIVER = "/tradeplate";
 const OFFICE = "/members/tradeplate";
@@ -878,17 +884,18 @@ async function driverRoutes(request, env, url, segments) {
 
   if (path === "unlock" && request.method === "POST") {
     const ip = request.headers.get("cf-connecting-ip") || "";
-    const gate = await rateLimit(env, "pin", ip, 10, 600);
+    const gate = await rateLimitCheck(env, "pin", ip, 10, 60);
     if (!gate.ok) {
-      await audit(env, request, "driver.pin", null, "rate-limited");
+      await audit(env, request, "driver.pin", null, `rate-limited:${gate.scope}`);
       return html(tooManyPage("Too many PIN attempts. Wait ten minutes."), 429, {
-        "retry-after": String(gate.retryAfter),
+        "retry-after": "600",
       });
     }
     const form = await request.formData();
     const next = String(form.get("next") ?? `${DRIVER}/`);
     const safeNext = /^\/tradeplate(\/[A-Za-z0-9/_-]*)?$/.test(next) ? next : `${DRIVER}/`;
     if (!safeEqual(String(form.get("pin") ?? ""), env.DRIVER_PIN)) {
+      await rateLimitFailure(env, "pin", ip, 600);
       await audit(env, request, "driver.pin", null, "wrong");
       return html(pinPage(safeNext, true), 401);
     }
@@ -1345,15 +1352,16 @@ async function officeRoutes(request, env, url, rest) {
     if (behindAccess(request)) return redirect(`${OFFICE}/`);
     if (request.method === "POST") {
       const ip = request.headers.get("cf-connecting-ip") || "";
-      const gate = await rateLimit(env, "office", ip, 5, 900);
+      const gate = await rateLimitCheck(env, "office", ip, 5, 30);
       if (!gate.ok) {
-        await audit(env, request, "office.login", null, "rate-limited");
+        await audit(env, request, "office.login", null, `rate-limited:${gate.scope}`);
         return html(tooManyPage("Too many sign-in attempts. Wait fifteen minutes."), 429, {
-          "retry-after": String(gate.retryAfter),
+          "retry-after": "900",
         });
       }
       const form = await request.formData();
       if (!env.ADMIN_PASSWORD || !safeEqual(String(form.get("password") ?? ""), env.ADMIN_PASSWORD)) {
+        await rateLimitFailure(env, "office", ip, 900);
         await audit(env, request, "office.login", null, "wrong-password");
         return html(loginPage(true), 401);
       }

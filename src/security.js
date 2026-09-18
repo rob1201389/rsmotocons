@@ -13,34 +13,65 @@
 /* ---------------------------------------------------------- rate limiting */
 
 /**
- * Fixed-window counter per client IP. Returns {ok, retryAfter}.
- *
- * Applied to the two places a secret can be guessed: the driver PIN and the
+ * Failure counters for the two guessable secrets: the driver PIN and the
  * office password. Both are low-entropy by necessity, so throttling is what
- * actually stops an online guessing attack.
+ * actually stops an online guessing run.
  *
- * Fails OPEN if KV is unavailable — a broken counter must not lock drivers out
- * of the yard. The trade-off is deliberate: availability of the record beats
- * throttling, because the secrets behind it are not the only control.
+ * Two dimensions are kept. Per-IP catches the ordinary case. A global counter
+ * sits behind it because per-IP alone is evaded by anyone with a handful of
+ * addresses; the global limit is set well above normal use, so a yard full of
+ * drivers mistyping a PIN stays under it and a distributed run does not.
+ *
+ * Only failures count. A correct entry is never charged against either limit,
+ * and clears the caller's own counter.
+ *
+ * Two honest limitations:
+ *  - KV reads are eventually consistent, so a burst inside the propagation
+ *    window can overshoot slightly. This slows a sustained attack; it does not
+ *    stop an instantaneous one.
+ *  - It fails OPEN if KV is unavailable. A broken counter must not strand a
+ *    driver in the yard, and neither secret is the only control.
  */
-export async function rateLimit(env, kind, ip, limit, windowSeconds) {
-  if (!env.LEADS || !ip) return { ok: true, retryAfter: 0 };
-  const key = `rl:tp:${kind}:${ip}`;
+
+const rlKey = (kind, who) => `rl:tp:${kind}:${who}`;
+
+async function count(env, key) {
   try {
-    const current = parseInt((await env.LEADS.get(key)) || "0", 10);
-    if (current >= limit) return { ok: false, retryAfter: windowSeconds };
-    await env.LEADS.put(key, String(current + 1), { expirationTtl: windowSeconds });
-    return { ok: true, retryAfter: 0 };
+    return parseInt((await env.LEADS.get(key)) || "0", 10);
   } catch {
-    return { ok: true, retryAfter: 0 };
+    return 0;
   }
 }
 
-/** Clears the counter after a success, so one bad typo does not accumulate. */
+/** Read-only: is this request already over either limit? */
+export async function rateLimitCheck(env, kind, ip, perIp, globalLimit) {
+  if (!env.LEADS) return { ok: true };
+  if (ip && (await count(env, rlKey(kind, ip))) >= perIp) return { ok: false, scope: "ip" };
+  if ((await count(env, rlKey(kind, "global"))) >= globalLimit) return { ok: false, scope: "global" };
+  return { ok: true };
+}
+
+/** Charge one failure against both counters. */
+export async function rateLimitFailure(env, kind, ip, windowSeconds) {
+  if (!env.LEADS) return;
+  try {
+    for (const who of [ip, "global"]) {
+      if (!who) continue;
+      const key = rlKey(kind, who);
+      await env.LEADS.put(key, String((await count(env, key)) + 1), {
+        expirationTtl: windowSeconds,
+      });
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Clears this caller's counter after a success. The global counter stands. */
 export async function rateLimitReset(env, kind, ip) {
   if (!env.LEADS || !ip) return;
   try {
-    await env.LEADS.delete(`rl:tp:${kind}:${ip}`);
+    await env.LEADS.delete(rlKey(kind, ip));
   } catch {
     /* non-fatal */
   }
