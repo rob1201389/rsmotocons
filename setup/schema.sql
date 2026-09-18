@@ -1,38 +1,28 @@
--- Trade plate record of use - Cloudflare D1 schema.
--- Apply with:  npx wrangler d1 execute tradeplate --remote --file=schema.sql
+-- Trade plate record of use — Cloudflare D1.
+-- Personal detail is encrypted into `enc` (AES-256-GCM under DATA_KEY).
+-- Only what is needed to index, sort and filter is stored in clear.
 
 CREATE TABLE IF NOT EXISTS plates (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   plate_number TEXT    NOT NULL UNIQUE,
   qr_slug      TEXT    NOT NULL UNIQUE,
-  expiry_date  TEXT,                       -- YYYY-MM-DD, NULL until set
+  expiry_date  TEXT,
   active       INTEGER NOT NULL DEFAULT 1,
   notes        TEXT,
   created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 CREATE TABLE IF NOT EXISTS trips (
-  id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  plate_id         INTEGER NOT NULL REFERENCES plates(id),
-  plate_number     TEXT    NOT NULL,       -- snapshot, so history survives a rename
-  batch_number     TEXT    NOT NULL,
-  vehicle_make     TEXT    NOT NULL,
-  vehicle_rego     TEXT,
-  trip_destination TEXT    NOT NULL,
-  purpose          TEXT,
-  driver_name      TEXT    NOT NULL,
-  driver_licence   TEXT,
-  out_at           TEXT    NOT NULL,       -- ISO 8601 UTC
-  in_at            TEXT,                   -- ISO 8601 UTC, NULL while the plate is out
-  signature_out    TEXT,                   -- PNG data URL
-  signature_in     TEXT,
-  notes            TEXT,
-  created_at       TEXT    NOT NULL,
-  created_ip       TEXT,
-  created_ua       TEXT,
-  completed_at     TEXT,
-  completed_ip     TEXT,
-  completed_ua     TEXT
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  plate_id     INTEGER NOT NULL REFERENCES plates(id),
+  plate_number TEXT    NOT NULL,
+  out_at       TEXT    NOT NULL,
+  in_at        TEXT,
+  created_at   TEXT    NOT NULL,
+  completed_at TEXT,
+  -- encrypted: driver name and licence, both signatures, batch, vehicle,
+  -- destination, purpose, notes, and the IP/browser of each entry
+  enc          TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS trips_plate_id_idx ON trips (plate_id);

@@ -19,15 +19,6 @@ document.addEventListener("DOMContentLoaded", function () {
     form.addEventListener("submit", function (e) {
       e.preventDefault();
 
-      var accessKey = form.querySelector('input[name="access_key"]');
-      if (!accessKey || accessKey.value.indexOf("YOUR-") === 0) {
-        status.hidden = false;
-        status.style.color = "#ce2b37";
-        status.textContent =
-          "The contact form isn't activated yet — please email us directly at info@rsmotocons.com.";
-        return;
-      }
-
       var button = form.querySelector('button[type="submit"]');
       var originalLabel = button.textContent;
       button.disabled = true;
@@ -35,10 +26,9 @@ document.addEventListener("DOMContentLoaded", function () {
       status.hidden = true;
 
       var data = Object.fromEntries(new FormData(form).entries());
-      // Checkbox → readable value in the email
-      data.marketingOptIn = form.querySelector("#optin").checked ? "Yes" : "No";
+      data.marketingOptIn = form.querySelector("#optin").checked;
 
-      fetch("https://api.web3forms.com/submit", {
+      fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(data),
@@ -48,17 +38,17 @@ document.addEventListener("DOMContentLoaded", function () {
           status.hidden = false;
           if (res.success) {
             status.style.color = "#009246";
-            status.textContent = "Thanks — your message has been sent. We'll reply within one business day.";
+            status.textContent = "Thanks — your message has been sent securely. We'll reply within one business day.";
             form.reset();
           } else {
             status.style.color = "#ce2b37";
-            status.textContent = "Something went wrong sending your message. Please email info@rsmotocons.com instead.";
+            status.textContent = res.error || "Something went wrong sending your message — please try again shortly.";
           }
         })
         .catch(function () {
           status.hidden = false;
           status.style.color = "#ce2b37";
-          status.textContent = "Network problem — please try again, or email info@rsmotocons.com.";
+          status.textContent = "Network problem — please try again in a moment.";
         })
         .finally(function () {
           button.disabled = false;

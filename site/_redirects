@@ -1,8 +1,0 @@
-# Safety net. Cloudflare Pages serves any file it doesn't recognise, including
-# these — and plates.sql holds every plate's scan code, .dev.vars holds the
-# secrets. Bounce them to the 404 page rather than serving their contents.
-# Verified: without these rules all four return 200 publicly.
-/wrangler.toml  /404.html  302
-/.dev.vars      /404.html  302
-/schema.sql     /404.html  302
-/plates.sql     /404.html  302

@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "white-rice-f5cc",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-01-01",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "kv_namespaces": [
+    { "binding": "LEADS", "id": "930eece805d647888c9296cfd2c91db1" }
+  ],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "tradeplate", "database_id": "d2480ba2-9869-45af-8ba9-d83f3de0c1cf" }
+  ],
+  "vars": {
+    "RETENTION_DAYS": "365",
+    "RETENTION_YEARS": "5",
+    "ORG_NAME": "RSMotoCons",
+    "PRIVACY_CONTACT": "the Privacy Officer",
+    "PRIVACY_CONTACT_EMAIL": "info@rsmotocons.com"
+  }
+}

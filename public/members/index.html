@@ -9,7 +9,17 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/site.css">
 <script src="/app.js" defer></script>
+<script src="/members/hub.js" defer></script>
 <style>
+  .msg{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:14px}
+  .msg-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .msg-head span{color:var(--muted);font-size:.85rem}
+  .msg-meta{color:var(--muted);font-size:.9rem;margin:4px 0 10px}
+  .msg-meta a{color:var(--accent)}
+  .msg .ok{color:var(--it-green);font-weight:600}
+  .msg p{color:var(--text);font-size:.95rem}
+  .msg .del{margin-top:12px;background:none;border:1px solid var(--line);border-radius:7px;padding:6px 14px;color:#ce2b37;font-weight:600;cursor:pointer}
+  .msg .del:hover{border-color:#ce2b37}
   .hub-note{
     display:flex;gap:12px;align-items:center;
     background:rgba(0,146,70,.10);border:1px solid rgba(0,146,70,.35);
@@ -71,12 +81,23 @@
         <span>Members area — access is controlled by RSMotoCons. If you believe you should have access, contact <a href="mailto:info@rsmotocons.com" style="color:var(--accent)">info@rsmotocons.com</a>.</span>
       </div>
 
+      <div class="sec-head" style="margin-bottom:28px">
+        <span class="tag">Inbox</span>
+        <h2>Customer Messages</h2>
+        <p>Enquiries from the website land here — stored encrypted, readable only inside the members area.</p>
+      </div>
+      <div id="inbox" style="margin-bottom:64px"></div>
+
+      <div class="sec-head" style="margin-bottom:28px">
+        <span class="tag">Your Tools</span>
+        <h2>Apps</h2>
+      </div>
       <div class="app-grid">
         <div class="card app-tile">
           <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h4M6 14h7M16 10h2M16 14h2"/></svg></div>
           <h3>Trade Plate Log <span class="badge live">Live</span></h3>
-          <p>Scan the QR label on any trade plate to sign it out and back in. Signatures, expiry checks, and a CSV export for an audit request.</p>
-          <div class="open"><a class="btn" href="/members/tradeplate/">Open</a></div>
+          <p>Every trade plate trip, signed and encrypted. Records, filters and a CSV export for an audit request.</p>
+          <div class="open"><a class="btn" href="/members/tradeplate/">Open records</a></div>
         </div>
 
         <div class="card app-tile">
@@ -115,7 +136,7 @@
       <div class="sec-head">
         <span class="tag">Early Access</span>
         <h2 style="color:var(--text-inv)">You're on the ground floor</h2>
-        <p style="color:var(--muted-inv)">Trade Plate Log is live now. The rest are being built, shaped by the dealerships in this members area. As each module goes live, its tile lights up here — no new logins, no new links to remember.</p>
+        <p style="color:var(--muted-inv)">The apps above are being built right now, shaped by the dealerships in this members area. As each module goes live, its tile lights up here — no new logins, no new links to remember.</p>
       </div>
       <a class="btn" href="/#contact">Request a feature / Get support</a>
     </div>
