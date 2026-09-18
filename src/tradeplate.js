@@ -114,6 +114,49 @@ async function readTrip(env, row) {
   }
 }
 
+/* --------------------------------------------------------------- settings */
+
+/**
+ * Operator-changeable settings, encrypted with the same key as record content.
+ *
+ * The driver PIN lives here once it has been changed in the office. Until then
+ * the DRIVER_PIN platform secret is used, so a fresh deployment still works
+ * before anyone visits the settings page.
+ */
+async function readSetting(env, key) {
+  try {
+    const row = await env.DB.prepare("SELECT enc FROM settings WHERE key = ?").bind(key).first();
+    if (!row) return null;
+    const v = await unseal(env, row.enc);
+    return v.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSetting(env, key, value, who) {
+  await env.DB.prepare(
+    `INSERT INTO settings (key, enc, updated_at, updated_by) VALUES (?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET enc = excluded.enc,
+       updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+  )
+    .bind(key, await seal(env, { value }), new Date().toISOString(), who || null)
+    .run();
+}
+
+/** The PIN in force: the one set in the office, else the platform secret. */
+async function currentPin(env) {
+  return (await readSetting(env, "driver_pin")) || env.DRIVER_PIN || "";
+}
+
+/**
+ * Bumping this invalidates every remembered phone at once, which is what you
+ * want the day someone leaves. Stored as a string, compared as one.
+ */
+async function driverEpoch(env) {
+  return (await readSetting(env, "driver_epoch")) || "1";
+}
+
 /* ------------------------------------------------------------------- time */
 
 function zonedParts(date) {
@@ -247,21 +290,26 @@ function readCookie(request, name) {
   return null;
 }
 
-async function sessionCookie(secret, name, path, maxAge) {
-  const payload = String(Date.now() + maxAge * 1000);
+async function sessionCookie(secret, name, path, maxAge, epoch = "") {
+  // The epoch is inside the signed payload, so it cannot be edited by the
+  // holder; changing it in settings invalidates every cookie already issued.
+  const payload = `${Date.now() + maxAge * 1000}~${epoch}`;
   return `${name}=${payload}.${await sign(secret, payload)}; Path=${path}; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 const clearCookie = (name, path) =>
   `${name}=; Path=${path}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 
-async function validSession(request, secret, name) {
+async function validSession(request, secret, name, epoch = null) {
   const raw = readCookie(request, name);
   if (!raw) return false;
   const [payload, mac] = raw.split(".");
   if (!payload || !mac) return false;
   if (!safeEqual(mac, await sign(secret, payload))) return false;
-  return Number(payload) > Date.now();
+  const [expires, cookieEpoch = ""] = payload.split("~");
+  if (Number(expires) <= Date.now()) return false;
+  if (epoch !== null && cookieEpoch !== epoch) return false;
+  return true;
 }
 
 /** Cloudflare Access stamps these at the edge; they cannot be spoofed inbound. */
@@ -280,6 +328,7 @@ function layout(o) {
   const nav = o.office
     ? `<a href="${OFFICE}/">Records</a>
        <a href="${OFFICE}/plates">Plates</a>
+       <a href="${OFFICE}/settings">Settings</a>
        ${
          o.actor
            ? `<span class="tp-actor">${esc(o.actor)}</span>`
@@ -868,8 +917,11 @@ async function driverRoutes(request, env, url, segments) {
 
   if (path === "privacy") return html(privacyPage(env));
 
+  const pin = await currentPin(env);
+  const epoch = await driverEpoch(env);
+
   // The PIN is not optional. Without it configured the tree stays shut.
-  if (!env.DRIVER_PIN)
+  if (!pin)
     return html(
       layout({
         title: "Not configured",
@@ -877,7 +929,7 @@ async function driverRoutes(request, env, url, segments) {
         lead: "The driver PIN has not been set.",
         crumb: "Trade plates",
         narrow: true,
-        body: `<p class="tp-empty">Set <code>DRIVER_PIN</code> on the Pages project. Until it is set, this stays closed.</p>`,
+        body: `<p class="tp-empty">Set <code>DRIVER_PIN</code> on the worker, or set a PIN in the office settings. Until then this stays closed.</p>`,
       }),
       503,
     );
@@ -894,7 +946,7 @@ async function driverRoutes(request, env, url, segments) {
     const form = await request.formData();
     const next = String(form.get("next") ?? `${DRIVER}/`);
     const safeNext = /^\/tradeplate(\/[A-Za-z0-9/_-]*)?$/.test(next) ? next : `${DRIVER}/`;
-    if (!safeEqual(String(form.get("pin") ?? ""), env.DRIVER_PIN)) {
+    if (!safeEqual(String(form.get("pin") ?? ""), pin)) {
       await rateLimitFailure(env, "pin", ip, 600);
       await audit(env, request, "driver.pin", null, "wrong");
       return html(pinPage(safeNext, true), 401);
@@ -902,11 +954,13 @@ async function driverRoutes(request, env, url, segments) {
     await rateLimitReset(env, "pin", ip);
     await audit(env, request, "driver.pin", null, "ok");
     return redirect(safeNext, {
-      "set-cookie": await sessionCookie(env.SESSION_SECRET, DRIVER_COOKIE, DRIVER, DRIVER_MAX_AGE),
+      "set-cookie": await sessionCookie(
+        env.SESSION_SECRET, DRIVER_COOKIE, DRIVER, DRIVER_MAX_AGE, epoch,
+      ),
     });
   }
 
-  if (!(await validSession(request, env.SESSION_SECRET, DRIVER_COOKIE)))
+  if (!(await validSession(request, env.SESSION_SECRET, DRIVER_COOKIE, epoch)))
     return html(pinPage(`${DRIVER}/${path}`, false));
 
   if (path === "new") {
@@ -1230,6 +1284,103 @@ async function platesPage(env, msg, actor) {
   });
 }
 
+async function settingsPage(env, msg, err, actor) {
+  const custom = await readSetting(env, "driver_pin");
+  const row = await env.DB.prepare("SELECT updated_at, updated_by FROM settings WHERE key = ?")
+    .bind("driver_pin")
+    .first();
+
+  return layout({
+    title: "Settings",
+    heading: 'Trade plate <span class="grad">settings</span>',
+    lead: "The driver PIN, and how to revoke phones that have it remembered.",
+    crumb: `<a href="${OFFICE}/">Records</a> / Settings`,
+    office: true,
+    actor,
+    narrow: true,
+    body: `
+      ${msg ? banner("ok", esc(msg)) : ""}
+      ${err ? banner("bad", esc(err)) : ""}
+
+      <div class="tp-notice" style="margin-bottom:22px">
+        <b>In force now:</b> ${
+          custom
+            ? `a PIN set here${row?.updated_at ? ` on ${fmt(row.updated_at)}` : ""}${row?.updated_by ? ` by ${esc(row.updated_by)}` : ""}.`
+            : "the PIN configured on the worker. Setting one here replaces it."
+        }
+        The PIN itself is encrypted before it is stored, so it is not readable from the database
+        and cannot be shown back to you here — only replaced.
+      </div>
+
+      <form method="post" action="${OFFICE}/settings" class="tp-form">
+        <input type="hidden" name="action" value="pin">
+        ${fieldRow(
+          "New driver PIN",
+          `<input type="text" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]*" required>`,
+          undefined,
+          "4 to 8 digits. Drivers enter this once per phone.",
+        )}
+        ${fieldRow(
+          "Confirm new PIN",
+          `<input type="text" id="pin2" name="pin2" inputmode="numeric" autocomplete="off" pattern="[0-9]*" required>`,
+        )}
+        <label class="tp-check">
+          <input type="checkbox" name="revoke" value="1">
+          <span>Also sign out every phone that already has the old PIN remembered.
+          Tick this when someone has left.</span>
+        </label>
+        <button type="submit" class="btn">Change PIN</button>
+      </form>
+
+      <hr class="tp-rule">
+
+      <form method="post" action="${OFFICE}/settings" class="tp-form">
+        <input type="hidden" name="action" value="revoke">
+        <p class="tp-hint" style="margin:0">
+          Sign out every phone without changing the PIN. Drivers will be asked for the
+          current PIN again next time they scan.
+        </p>
+        <button type="submit" class="btn ghost on-light" style="align-self:flex-start">
+          Sign out all phones
+        </button>
+      </form>`,
+  });
+}
+
+async function handleSettingsAction(request, env, actor) {
+  const form = await request.formData();
+  const action = String(form.get("action") ?? "");
+
+  if (action === "revoke") {
+    const next = String(Number(await driverEpoch(env)) + 1);
+    await writeSetting(env, "driver_epoch", next, actor);
+    await audit(env, request, "settings.revoke_phones", `epoch=${next}`, "ok");
+    return redirect(`${OFFICE}/settings?msg=${encodeURIComponent("All phones signed out. Drivers will be asked for the PIN again.")}`);
+  }
+
+  if (action === "pin") {
+    const pin = String(form.get("pin") ?? "").trim();
+    const pin2 = String(form.get("pin2") ?? "").trim();
+    if (!/^[0-9]{4,8}$/.test(pin))
+      return redirect(`${OFFICE}/settings?err=${encodeURIComponent("The PIN must be 4 to 8 digits.")}`);
+    if (pin !== pin2)
+      return redirect(`${OFFICE}/settings?err=${encodeURIComponent("The two PINs did not match.")}`);
+
+    await writeSetting(env, "driver_pin", pin, actor);
+    let note = "PIN changed. Tell the drivers.";
+    if (String(form.get("revoke")) === "1") {
+      const next = String(Number(await driverEpoch(env)) + 1);
+      await writeSetting(env, "driver_epoch", next, actor);
+      note = "PIN changed and every phone signed out. Tell the drivers.";
+    }
+    // The PIN is never written to the audit trail, only the fact of the change.
+    await audit(env, request, "settings.pin_change", null, "ok");
+    return redirect(`${OFFICE}/settings?msg=${encodeURIComponent(note)}`);
+  }
+
+  return redirect(`${OFFICE}/settings`);
+}
+
 async function handlePlateAction(request, env) {
   const form = await request.formData();
   const action = String(form.get("action") ?? "");
@@ -1384,6 +1535,13 @@ async function officeRoutes(request, env, url, rest) {
     if (rest[1] === "print") return html(await labelSheetPage(env, url, actor));
     if (request.method === "POST") return handlePlateAction(request, env);
     return html(await platesPage(env, url.searchParams.get("msg"), actor));
+  }
+
+  if (rest[0] === "settings") {
+    if (request.method === "POST") return handleSettingsAction(request, env, actor);
+    return html(
+      await settingsPage(env, url.searchParams.get("msg"), url.searchParams.get("err"), actor),
+    );
   }
 
   if (rest[0] === "export.csv") {

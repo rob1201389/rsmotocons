@@ -334,3 +334,15 @@
   .tp-summary, .tp-detail, .tp-sigs { grid-template-columns: 1fr; }
   .tp-page-head { align-items: flex-start; }
 }
+
+/* ------------------------------------------------------------- settings */
+.tp-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: .88rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.tp-check input { width: auto; margin-top: 4px; flex: none; }
+.tp-rule { border: 0; border-top: 1px solid var(--line); margin: 30px 0; }

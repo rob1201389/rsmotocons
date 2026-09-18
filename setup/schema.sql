@@ -31,3 +31,12 @@ CREATE INDEX IF NOT EXISTS trips_out_at_idx   ON trips (out_at);
 -- A plate can only be out once at a time, even if two phones submit together.
 CREATE UNIQUE INDEX IF NOT EXISTS trips_one_open_per_plate_idx
   ON trips (plate_id) WHERE in_at IS NULL;
+
+-- Operator-changeable settings. Values are encrypted with DATA_KEY, the same
+-- way record content is, so the driver PIN is never stored in clear.
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  enc        TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
