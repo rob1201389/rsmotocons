@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Member Hub — RSMotoCons</title>
+<meta name="description" content="RSMotoCons members area — access your dealership tools.">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/site.css">
+<script src="/app.js" defer></script>
+<style>
+  .hub-note{
+    display:flex;gap:12px;align-items:center;
+    background:rgba(0,146,70,.10);border:1px solid rgba(0,146,70,.35);
+    border-radius:10px;padding:14px 18px;margin-bottom:40px;
+    color:var(--muted);font-size:.92rem;
+  }
+  .hub-note .lock{font-size:1.2rem}
+  .badge{
+    display:inline-block;padding:4px 12px;border-radius:999px;
+    font-size:.75rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+  }
+  .badge.soon{background:rgba(47,111,214,.12);color:var(--accent)}
+  .badge.live{background:rgba(0,146,70,.12);color:var(--it-green)}
+  .app-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px}
+  .app-tile h3{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .app-tile .open{margin-top:16px}
+  .app-tile .open .btn{width:100%;text-align:center;padding:11px 0}
+  .app-tile .open .btn[aria-disabled="true"]{
+    background:var(--silver-2);color:var(--muted);box-shadow:none;cursor:not-allowed;
+  }
+  .app-tile .open .btn[aria-disabled="true"]:hover{transform:none}
+</style>
+</head>
+<body>
+
+<div class="tricolore-bar" aria-hidden="true"></div>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/" aria-label="RSMotoCons home">
+      <img src="/favicon.svg" alt="" width="40" height="40">
+      <span>RS<span class="moto">Moto</span>Cons</span>
+    </a>
+    <button class="menu-toggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
+    <nav class="links">
+      <a href="/#tools">Tools</a>
+      <a href="/platform.html">Platform</a>
+      <a href="/about.html">About</a>
+      <a href="/members/" class="active">Members</a>
+      <a href="/#contact" class="btn ghost" style="padding:10px 20px">Get in Touch</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap">
+      <p class="crumb"><a href="/">Home</a> / Members</p>
+      <h1>Member <span class="grad">Hub</span></h1>
+      <p class="lead">Welcome back. Your dealership tools live here — one login, every department.</p>
+      <div class="stripe" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <section class="tight">
+    <div class="wrap">
+      <div class="hub-note">
+        <span class="lock" aria-hidden="true">🔒</span>
+        <span>Members area — access is controlled by RSMotoCons. If you believe you should have access, contact <a href="mailto:info@rsmotocons.com" style="color:var(--accent)">info@rsmotocons.com</a>.</span>
+      </div>
+
+      <div class="app-grid">
+        <div class="card app-tile">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h4M6 14h7M16 10h2M16 14h2"/></svg></div>
+          <h3>Trade Plate Log <span class="badge live">Live</span></h3>
+          <p>Scan the QR label on any trade plate to sign it out and back in. Signatures, expiry checks, and a CSV export for an audit request.</p>
+          <div class="open"><a class="btn" href="/members/tradeplate/">Open</a></div>
+        </div>
+
+        <div class="card app-tile">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 7l2-4h14l2 4M3 7v13h18V7"/><path d="M8 11h8M8 15h5"/></svg></div>
+          <h3>Inventory Manager <span class="badge soon">In Development</span></h3>
+          <p>Live lot visibility, aging alerts, pricing insights, and feed sync for your stock.</p>
+          <div class="open"><a class="btn" aria-disabled="true">Coming Soon</a></div>
+        </div>
+
+        <div class="card app-tile">
+          <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg></div>
+          <h3>Lead Manager <span class="badge soon">In Development</span></h3>
+          <p>Every enquiry captured, assigned, and worked through to sold — with full timelines.</p>
+          <div class="open"><a class="btn" aria-disabled="true">Coming Soon</a></div>
+        </div>
+
+        <div class="card app-tile">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18M9 15l2 2 4-4"/></svg></div>
+          <h3>Test Drive Scheduler <span class="badge soon">In Development</span></h3>
+          <p>Bookings without double-ups, secure ID capture, and a clean daily run sheet.</p>
+          <div class="open"><a class="btn" aria-disabled="true">Coming Soon</a></div>
+        </div>
+
+        <div class="card app-tile">
+          <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg></div>
+          <h3>Deposits &amp; Finance <span class="badge soon">In Development</span></h3>
+          <p>Online holding deposits, funding &amp; CIT tracking, and automatic tax invoices.</p>
+          <div class="open"><a class="btn" aria-disabled="true">Coming Soon</a></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dark-sec tight">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">Early Access</span>
+        <h2 style="color:var(--text-inv)">You're on the ground floor</h2>
+        <p style="color:var(--muted-inv)">Trade Plate Log is live now. The rest are being built, shaped by the dealerships in this members area. As each module goes live, its tile lights up here — no new logins, no new links to remember.</p>
+      </div>
+      <a class="btn" href="/#contact">Request a feature / Get support</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="tricolore-bar" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="ftop">
+      <div>
+        <div class="fbrand"><img src="/favicon.svg" alt=""><span>RS<span style="color:var(--accent-2)">Moto</span>Cons</span></div>
+        <p>Dealership operations tools built on 20 years across the automotive industry — independent repairers, dealerships, OEM, and factory-backed operations.</p>
+      </div>
+      <div class="fcol">
+        <h4>Tools</h4>
+        <ul>
+          <li><a href="/inventory.html">Inventory</a></li>
+          <li><a href="/marketing.html">Marketing</a></li>
+          <li><a href="/sales.html">Sales</a></li>
+          <li><a href="/finance.html">Finance</a></li>
+        </ul>
+      </div>
+      <div class="fcol">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/about.html">About</a></li>
+          <li><a href="/platform.html">Platform</a></li>
+          <li><a href="/members/">Members Area</a></li>
+          <li><a href="/privacy.html">Privacy Policy</a></li>
+          <li><a href="/terms.html">Terms of Use</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fbot">
+      <p><span class="flag" aria-hidden="true"></span>© 2026 RSMotoCons · Dealership Operations Tools</p>
+      <p><a href="mailto:info@rsmotocons.com">info@rsmotocons.com</a></p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

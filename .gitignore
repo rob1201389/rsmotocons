@@ -1,0 +1,4 @@
+# Local dev only - never deploy these
+.dev.vars
+.wrangler/
+node_modules/

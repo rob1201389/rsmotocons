@@ -1,0 +1,39 @@
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.web3forms.com; object-src 'none'; base-uri 'self'; form-action 'self' https://api.web3forms.com; frame-ancestors 'none'; upgrade-insecure-requests
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+/logo.svg
+  Cache-Control: public, max-age=86400
+
+/favicon.svg
+  Cache-Control: public, max-age=86400
+
+/app.js
+  Cache-Control: public, max-age=3600
+
+/site.css
+  Cache-Control: public, max-age=3600
+
+/members/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
+
+/members/tradeplate/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store, must-revalidate
+  Referrer-Policy: no-referrer
+
+/members/tradeplate/app.js
+  Cache-Control: public, max-age=3600
+
+/members/tradeplate/tradeplate.css
+  Cache-Control: public, max-age=3600
+
+/members/tradeplate/qrcode.min.js
+  Cache-Control: public, max-age=86400
