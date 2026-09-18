@@ -17,6 +17,8 @@
  * request back to the asset server.
  */
 
+import { rateLimit, rateLimitReset, audit, sameOrigin } from "./security.js";
+
 const DRIVER = "/tradeplate";
 const OFFICE = "/members/tradeplate";
 const ASSET = "/assets/tradeplate";
@@ -204,7 +206,7 @@ function expiryStatus(expiry) {
 
 const OFFICE_COOKIE = "tp_office";
 const DRIVER_COOKIE = "tp_driver";
-const OFFICE_MAX_AGE = 60 * 60 * 12;
+const OFFICE_MAX_AGE = 60 * 60 * 2;
 const DRIVER_MAX_AGE = 60 * 60 * 24 * 60;
 
 async function sign(secret, payload) {
@@ -737,6 +739,7 @@ async function handleSignOut(request, env, plate, form) {
     return rerender();
   }
 
+  await audit(env, request, "trip.out", `${target.plate_number}`, "ok");
   return redirect(`${DRIVER}/p/${target.qr_slug}?saved=out`);
 }
 
@@ -802,8 +805,19 @@ async function handleBookIn(request, env, plate, form) {
     .bind(inAt.toISOString(), new Date().toISOString(), sealed, tripId)
     .run();
 
+  await audit(env, request, "trip.in", `${plate.plate_number}#${tripId}`, "ok");
   return redirect(`${DRIVER}/p/${plate.qr_slug}?saved=in`);
 }
+
+const tooManyPage = (msg) =>
+  layout({
+    title: "Too many attempts",
+    heading: 'Too many <span class="grad">attempts</span>',
+    lead: msg,
+    crumb: "Trade plates",
+    narrow: true,
+    body: `<p class="tp-empty">This is a deliberate delay after repeated wrong entries. Try again shortly, or ask the office.</p>`,
+  });
 
 const notFoundPage = () =>
   layout({
@@ -863,11 +877,23 @@ async function driverRoutes(request, env, url, segments) {
     );
 
   if (path === "unlock" && request.method === "POST") {
+    const ip = request.headers.get("cf-connecting-ip") || "";
+    const gate = await rateLimit(env, "pin", ip, 10, 600);
+    if (!gate.ok) {
+      await audit(env, request, "driver.pin", null, "rate-limited");
+      return html(tooManyPage("Too many PIN attempts. Wait ten minutes."), 429, {
+        "retry-after": String(gate.retryAfter),
+      });
+    }
     const form = await request.formData();
     const next = String(form.get("next") ?? `${DRIVER}/`);
     const safeNext = /^\/tradeplate(\/[A-Za-z0-9/_-]*)?$/.test(next) ? next : `${DRIVER}/`;
-    if (!safeEqual(String(form.get("pin") ?? ""), env.DRIVER_PIN))
+    if (!safeEqual(String(form.get("pin") ?? ""), env.DRIVER_PIN)) {
+      await audit(env, request, "driver.pin", null, "wrong");
       return html(pinPage(safeNext, true), 401);
+    }
+    await rateLimitReset(env, "pin", ip);
+    await audit(env, request, "driver.pin", null, "ok");
     return redirect(safeNext, {
       "set-cookie": await sessionCookie(env.SESSION_SECRET, DRIVER_COOKIE, DRIVER, DRIVER_MAX_AGE),
     });
@@ -1215,6 +1241,7 @@ async function handlePlateAction(request, env) {
       .prepare("INSERT INTO plates (plate_number, qr_slug, expiry_date, notes) VALUES (?,?,?,?)")
       .bind(number, slugId(), expiry || null, String(form.get("notes") ?? "").trim() || null)
       .run();
+    await audit(env, request, "plate.add", number, "ok");
     return redirect(
       `${OFFICE}/plates?msg=${encodeURIComponent(`${number} added. Reprint the label sheet.`)}`,
     );
@@ -1228,6 +1255,7 @@ async function handlePlateAction(request, env) {
     if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value))
       return redirect(`${OFFICE}/plates?msg=Enter+a+valid+expiry+date`);
     await db.prepare("UPDATE plates SET expiry_date = ? WHERE id = ?").bind(value || null, id).run();
+    await audit(env, request, "plate.expiry", `#${id}=${value || "cleared"}`, "ok");
     return redirect(`${OFFICE}/plates?msg=Expiry+updated`);
   }
 
@@ -1238,6 +1266,7 @@ async function handlePlateAction(request, env) {
         `${OFFICE}/plates?msg=${encodeURIComponent("That plate is out. Book it back in before retiring it.")}`,
       );
     await db.prepare("UPDATE plates SET active = ? WHERE id = ?").bind(active, id).run();
+    await audit(env, request, "plate.active", `#${id}=${active}`, "ok");
     return redirect(`${OFFICE}/plates?msg=Plate+updated`);
   }
 
@@ -1315,9 +1344,21 @@ async function officeRoutes(request, env, url, rest) {
     // Only reachable while Cloudflare Access is not yet in front of /members.
     if (behindAccess(request)) return redirect(`${OFFICE}/`);
     if (request.method === "POST") {
+      const ip = request.headers.get("cf-connecting-ip") || "";
+      const gate = await rateLimit(env, "office", ip, 5, 900);
+      if (!gate.ok) {
+        await audit(env, request, "office.login", null, "rate-limited");
+        return html(tooManyPage("Too many sign-in attempts. Wait fifteen minutes."), 429, {
+          "retry-after": String(gate.retryAfter),
+        });
+      }
       const form = await request.formData();
-      if (!env.ADMIN_PASSWORD || !safeEqual(String(form.get("password") ?? ""), env.ADMIN_PASSWORD))
+      if (!env.ADMIN_PASSWORD || !safeEqual(String(form.get("password") ?? ""), env.ADMIN_PASSWORD)) {
+        await audit(env, request, "office.login", null, "wrong-password");
         return html(loginPage(true), 401);
+      }
+      await rateLimitReset(env, "office", ip);
+      await audit(env, request, "office.login", null, "ok");
       return redirect(`${OFFICE}/`, {
         "set-cookie": await sessionCookie(env.SESSION_SECRET, OFFICE_COOKIE, OFFICE, OFFICE_MAX_AGE),
       });
@@ -1337,11 +1378,15 @@ async function officeRoutes(request, env, url, rest) {
     return html(await platesPage(env, url.searchParams.get("msg"), actor));
   }
 
-  if (rest[0] === "export.csv") return exportCsv(env, url);
+  if (rest[0] === "export.csv") {
+    await audit(env, request, "records.export", url.search || "(no filter)", "ok");
+    return exportCsv(env, url);
+  }
 
   if (rest[0] === "trips" && rest[1]) {
     const row = await env.DB.prepare("SELECT * FROM trips WHERE id = ?").bind(Number(rest[1])).first();
     if (!row) return html(notFoundPage(), 404);
+    await audit(env, request, "record.view", `#${rest[1]}`, "ok");
     return html(tripPage(await readTrip(env, row), actor));
   }
 
@@ -1371,6 +1416,12 @@ export async function handleTradeplate(request, env, url) {
   if (!env.DB) return notConfigured("DB");
   if (!env.SESSION_SECRET) return notConfigured("SESSION_SECRET");
   if (!env.DATA_KEY) return notConfigured("DATA_KEY");
+
+  // Second layer behind SameSite=Lax cookies: refuse a cross-site write.
+  if (request.method !== "GET" && request.method !== "HEAD" && !sameOrigin(request, url)) {
+    await audit(env, request, "csrf.block", p, "rejected");
+    return html("<h1>Request refused</h1><p>That request did not come from this site.</p>", 403);
+  }
 
   const base = isDriver ? DRIVER : OFFICE;
   const segments = p.slice(base.length).split("/").filter(Boolean);

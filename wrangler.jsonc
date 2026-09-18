@@ -3,6 +3,9 @@
   "name": "white-rice-f5cc",
   "main": "src/worker.js",
   "compatibility_date": "2026-01-01",
+  // Retention purge: 03:15 UTC Sundays (about 2pm Sydney). Apply with
+  // `wrangler triggers deploy` - a versions deploy does not change triggers.
+  "triggers": { "crons": ["15 3 * * 0"] },
   "assets": { "directory": "./public", "binding": "ASSETS" },
   "kv_namespaces": [
     { "binding": "LEADS", "id": "930eece805d647888c9296cfd2c91db1" }

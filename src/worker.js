@@ -24,6 +24,7 @@
  */
 
 import { handleTradeplate } from "./tradeplate.js";
+import { purgeExpiredTrips } from "./security.js";
 
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
@@ -33,6 +34,40 @@ const CSP =
 const MAX = { name: 120, email: 254, department: 60, message: 4000 };
 
 export default {
+  /**
+   * Retention is enforced, not just documented: closed trade plate records
+   * older than RETENTION_YEARS are deleted on a schedule. Open records are
+   * never touched. The run is recorded in the audit trail.
+   */
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const { deleted, cutoff } = await purgeExpiredTrips(env);
+          console.log(`retention purge: deleted ${deleted} record(s) before ${cutoff}`);
+          if (env.LEADS) {
+            const invTs = String(1e13 - Date.now()).padStart(13, "0");
+            await env.LEADS.put(
+              `audit:tp:${invTs}:schedule`,
+              JSON.stringify({
+                at: new Date().toISOString(),
+                action: "retention.purge",
+                target: cutoff,
+                result: `deleted:${deleted}`,
+                actor: "scheduled",
+                ip: "",
+                ua: "",
+              }),
+              { expirationTtl: 60 * 60 * 24 * 730 },
+            );
+          }
+        } catch (err) {
+          console.error("retention purge failed:", err && err.message);
+        }
+      })(),
+    );
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
@@ -87,8 +122,10 @@ function withSecurityHeaders(res, pathname) {
   if (pathname.startsWith("/members") || pathname.startsWith("/tradeplate")) {
     out.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     out.headers.set("Cache-Control", "no-store");
-    // A plate URL is effectively a key; do not leak it in a referrer header.
-    if (pathname.startsWith("/tradeplate")) out.headers.set("Referrer-Policy", "no-referrer");
+    // A plate URL is effectively a key, so it must not reach a third-party
+    // site. "same-origin" achieves that and, unlike "no-referrer", leaves the
+    // Origin/Referer headers intact for our own cross-site-request check.
+    if (pathname.startsWith("/tradeplate")) out.headers.set("Referrer-Policy", "same-origin");
   } else if (/\.(svg|css|js)$/.test(pathname)) {
     out.headers.set("Cache-Control", "public, max-age=3600");
   }
