@@ -1,0 +1,64 @@
+name: Deploy to Cloudflare
+
+# Pushing to main publishes the site and the trade plate app.
+#
+# Before this worked, a push to GitHub changed nothing on rsmotocons.com —
+# the live worker was only ever updated by running wrangler by hand.
+#
+# "Run workflow" on the Actions tab deploys the current main without needing
+# a commit, which is the button to use if you just want to re-publish.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "setup/**"
+  workflow_dispatch:
+
+# Never let two deploys race. A queued one waits rather than overtaking.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: wrangler deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Fails the run before touching production if the config is malformed.
+      - name: Check the config builds
+        run: npx --yes wrangler@4 deploy --dry-run
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Worth knowing: `wrangler deploy` does not touch secrets. DATA_KEY,
+      # SESSION_SECRET, DRIVER_PIN and ADMIN_PASSWORD keep their current
+      # values, because they are set on the worker and not in wrangler.jsonc.
+      - name: Confirm the site is answering
+        run: |
+          set -e
+          sleep 5
+          for path in / /tradeplate/ /privacy; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://rsmotocons.com$path")
+            echo "$path -> $code"
+            case "$code" in
+              200|302|303|307) ;;
+              *) echo "Unexpected status for $path"; exit 1 ;;
+            esac
+          done
