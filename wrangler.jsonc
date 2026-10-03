@@ -3,6 +3,10 @@
   "name": "white-rice-f5cc",
   "main": "src/worker.js",
   "compatibility_date": "2026-01-01",
+  // Serve only on rsmotocons.com, which sits behind Cloudflare Access. The
+  // workers.dev and preview URLs bypass Access, so keep them off.
+  "workers_dev": false,
+  "preview_urls": false,
   // Retention purge: 03:15 UTC Sundays (about 2pm Sydney). Cloudflare rejects
   // numeric day-of-week here, so the day is named. Apply with
   // `wrangler triggers deploy` - a versions deploy does not change triggers.
