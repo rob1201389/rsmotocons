@@ -54,7 +54,7 @@ jobs:
         run: |
           set -e
           sleep 5
-          for path in / /tradeplate/ /privacy; do
+          for path in / /tradeplate/ /privacy /photoai/; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://rsmotocons.com$path")
             echo "$path -> $code"
             case "$code" in

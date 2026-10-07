@@ -23,3 +23,15 @@
 /members/*
   X-Robots-Tag: noindex, nofollow
   Cache-Control: no-store
+
+# Car Studio (/photoai). Built in the tradeplate repo, studio/ folder:
+# `npm run build:cloudflare`, then copy cloudflare/photoai here.
+# The site-wide policy above blocks WebAssembly, blob: previews and the AI
+# model download, so this path drops it ("! ") and sets its own. Still no
+# inline scripts; the only third-party script is the AI runtime on jsDelivr.
+/photoai/*
+  X-Robots-Tag: noindex, nofollow
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: blob: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://vpic.nhtsa.dot.gov; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  ! Permissions-Policy
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()
