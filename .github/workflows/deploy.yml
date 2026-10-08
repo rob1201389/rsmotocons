@@ -59,6 +59,9 @@ jobs:
             echo "$path -> $code"
             case "$code" in
               200|302|303|307) ;;
+              # Cloudflare's bot protection challenges GitHub's runners, so a
+              # 403 here says nothing about the deploy. Warn, don't fail.
+              403) echo "::warning::$path returned 403 to the runner (bot protection); check it in a browser" ;;
               *) echo "Unexpected status for $path"; exit 1 ;;
             esac
           done
