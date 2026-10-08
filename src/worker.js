@@ -12,6 +12,8 @@
  * - Everything else falls through to the static site, with security headers
  *   applied here (advanced mode bypasses the _headers file).
  *
+ * - POST /photoai/api/glass   — Car Studio AI glass clean-up, in photoai.js.
+ *
  * - /tradeplate/*  and /members/tradeplate/*
  *                               — trade plate record of use, in tradeplate.js.
  *                                 Records are encrypted with the same DATA_KEY.
@@ -24,6 +26,7 @@
  */
 
 import { handleTradeplate } from "./tradeplate.js";
+import { handlePhotoai } from "./photoai.js";
 import { purgeExpiredTrips } from "./security.js";
 
 const CSP =
@@ -80,6 +83,10 @@ export default {
       if (url.pathname === "/members/api/leads/delete" && request.method === "POST") {
         return await requireMembers(request, env, url, () => deleteLead(request, env));
       }
+
+      // Car Studio AI glass clean-up (/photoai/api/glass).
+      const photoai = await handlePhotoai(request, env, url);
+      if (photoai) return photoai;
 
       // Trade plate record of use. Returns null when the path is not its own.
       const plates = await handleTradeplate(request, env, url);
