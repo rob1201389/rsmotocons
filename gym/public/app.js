@@ -193,16 +193,19 @@ function mkFig(cls, animKey, big) {
 }
 
 /* ======================================================== program/days === */
-function dayName(d) { return ({1:'Upper A',2:'Lower A',3:'Upper B',4:'Lower B'})[d] || 'Day ' + d; }
-function dayFocus(d) { return ({1:'Push, pull and core',2:'Squat pattern and carries',
-  3:'Volume upper body',4:'Hinge, single leg and trunk'})[d] || ''; }
+function dayName(d) { const pd = programDay(d); return pd ? pd.name : 'Day ' + d; }
+function dayFocus(d) {
+  const pd = programDay(d); if (!pd) return '';
+  return pd.exercises.slice(0, 3).map(e => (EX_INDEX[e.id] || {}).short).filter(Boolean).join(' · ');
+}
 
 /* Which day comes next: the one least recently trained. */
 function nextDay() {
   const last = {};
   C_completed().forEach(s => { last[s.dayId] = s.date; });
+  const n = currentProgram().days.length;
   let best = 1, bestDate = '9999';
-  for (let d = 1; d <= 4; d++) {
+  for (let d = 1; d <= n; d++) {
     const dt = last[d] || '0000';
     if (dt < bestDate) { bestDate = dt; best = d; }
   }
@@ -210,21 +213,37 @@ function nextDay() {
 }
 function C_completed() { return completedSessions(S); }
 
-/* The default roster for a day, honouring equipment and the chosen variants. */
+/* The roster comes from the generated programme, so goal, experience, days per
+   week, session length and equipment all actually decide what you train. */
+function currentProgram() {
+  const sig = [S.profile.trainingDaysPerWeek, S.profile.goal, S.profile.experience,
+               S.profile.sessionMinutes,
+               JSON.stringify(S.profile.equipment)].join('|');
+  if (!S.program || S.program.signature !== sig) {
+    const p = buildProgram(S.profile, EXERCISES);
+    S.program = Object.assign({}, S.program, p, { signature: sig });
+    persist();
+  }
+  return S.program;
+}
+function programDay(day) {
+  const p = currentProgram();
+  return p.days[(day - 1) % p.days.length] || p.days[0];
+}
 function rosterFor(day) {
-  const pref = (S.profile.variantChoice) || {};
-  const all = exercisesForDay(day);
-  const picked = [];
-  const seenSlot = new Set();
-  all.forEach(ex => {
-    const slot = ex.day + ':' + ex.order;
-    const chosen = pref[slot];
-    if (chosen && chosen !== ex.id) return;             // user picked a different variant
-    if (!chosen && seenSlot.has(slot)) return;          // default: first variant in the slot
-    if (!hasEquipment(ex)) return;
-    seenSlot.add(slot); picked.push(ex);
-  });
-  return picked;
+  const pd = programDay(day);
+  let list = pd.exercises.map(e => EX_INDEX[e.id]).filter(Boolean);
+  // anything deferred from a shortened session of this day comes first next time
+  const def = (S.deferred && S.deferred[day]) || [];
+  if (def.length) {
+    const back = def.map(id => EX_INDEX[id]).filter(Boolean).filter(e => !list.some(x => x.id === e.id));
+    list = back.concat(list);
+  }
+  return list;
+}
+function prescriptionForProgram(ex, day) {
+  const pd = programDay(day);
+  return pd.exercises.find(e => e.id === ex.id) || null;
 }
 function hasEquipment(ex) {
   const eq = S.profile.equipment || {};
@@ -239,7 +258,15 @@ function hasEquipment(ex) {
 function startSession(day, checkin) {
   const sess = newSession(day, todayISO());
   sess.checkin = checkin || null;
-  rosterFor(day).forEach(ex => {
+  const full = rosterFor(day);
+  const plan = applySessionPlan(full, checkin, S.profile);
+  sess.plan = { shortened: plan.shortened, kept: plan.kept.map(e => e.id),
+                dropped: plan.dropped.map(e => e.id), explain: plan.explain };
+  if (plan.shortened) {
+    S.deferred = S.deferred || {};
+    S.deferred[day] = plan.dropped.map(e => e.id);   // roll into the next session of this day
+  }
+  plan.kept.forEach(ex => {
     const entry = newEntry(ex.id, ex.id);
     const d = decideForEx(ex, checkin);
     entry.decision = d;
@@ -250,6 +277,8 @@ function startSession(day, checkin) {
     }
     sess.entries.push(entry);
   });
+  if (S.deferred && S.deferred[day] && !plan.shortened) delete S.deferred[day];
+  closeDeloadIfDue(S, todayISO());
   S.sessions.push(sess);
   live.session = sess;
   S._liveId = sess.id;
@@ -277,7 +306,15 @@ function finishSession() {
   sess.status = 'completed'; sess.endedAt = Date.now();
   recomputeBests(S, EX_INDEX);
   live.session = null; delete S._liveId;
+  closeDeloadIfDue(S, todayISO());
   persist();
+  if (S._updateWaiting && navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+    navigator.serviceWorker.getRegistration().then(r => {
+      if (r && r.waiting && confirm('Workout saved. Apply the pending app update now?')) {
+        r.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+    }).catch(() => {});
+  }
   showCompletion(sess);
   renderAll();
 }
@@ -342,8 +379,10 @@ function renderToday() {
     const b = el('div','banner');
     b.innerHTML = `<div><b>Deload suggested</b><br><span class="muted">${esc(dl.reason)} ${esc(dl.plan)}</span></div>`;
     const acc = el('button','btn sm','Accept'); acc.onclick = () => {
-      S.deloadAccepted = { at: todayISO(), plan: dl.plan }; persist(); toast('Deload week accepted'); renderAll(); };
-    const no = el('button','btn sm ghost','Not now'); no.onclick = () => { S._deloadDismissed = todayISO(); persist(); renderAll(); };
+      const d = acceptDeload(S, todayISO());
+      persist(); toast(`Deload week: ${d.startDate} to ${d.endDate}`); renderAll(); };
+    const no = el('button','btn sm ghost','Not now'); no.onclick = () => {
+      dismissDeload(S, todayISO()); persist(); renderAll(); };
     const row = el('div','row'); row.style.marginTop='8px'; row.append(acc, no);
     b.querySelector('div').appendChild(row);
     notices.appendChild(b);
@@ -449,8 +488,15 @@ function renderTrain() {
   $('#finishBtn').onclick = finishSession;
   $('#abandonBtn').onclick = () => { if (confirm('Discard this session and everything logged in it?')) abandonSession(); };
 
+  if (sess.plan && sess.plan.shortened) {
+    const b = el('div','banner');
+    b.innerHTML = `<div><b>${esc(sess.plan.explain.what)}</b><br>
+      <span class="muted">${esc(sess.plan.explain.why)}</span><br>
+      <span class="dim" style="font-size:.8rem">${esc(sess.plan.explain.next)}</span></div>`;
+    notices.appendChild(b);
+  }
   const advice = sessionPlanAdvice(sess.checkin, S.profile.sessionMinutes, sess.entries.length);
-  (advice || []).forEach(a => {
+  (advice || []).filter(a => a.action !== 'shorten').forEach(a => {
     const b = el('div','banner' + (a.action === 'pain_review' ? ' bad' : ''));
     b.innerHTML = `<div><b>${esc(a.explain.what)}</b><br><span class="muted">${esc(a.explain.why)}</span></div>`;
     notices.appendChild(b);
@@ -479,6 +525,42 @@ function exCard(sess, entry, idx) {
   card.appendChild(hd);
 
   const body = el('div','ex-body');
+
+  // A paused exercise shows no sets at all: there is nothing to log.
+  if (d && d.paused) {
+    card.classList.add('paused');
+    const warn = el('div','banner bad');
+    warn.innerHTML = `<div><b>${esc(d.explain.what)}</b><br><span class="muted">${esc(d.explain.why)}</span>
+      <br><span class="dim" style="font-size:.8rem">${esc(d.explain.next)}</span></div>`;
+    body.appendChild(warn);
+    const opts = el('div','mediabar');
+    (d.resumeOptions || []).forEach(o => {
+      const b = el('button','btn sm' + (o.id === 'clear' ? '' : ' ghost'), esc(o.label));
+      b.title = o.detail;
+      b.onclick = () => {
+        if (o.id === 'substitute') { swapExercise(sess, entry, ex); }
+        else if (o.id === 'skip') {
+          entry.skipped = true; persist(); renderTrain(); toast('Skipped — nothing logged');
+        } else if (o.id === 'clear') {
+          const c = openConcernFor(S, entry.variantId);
+          if (!c) { toast('No open concern to clear', 'warn'); return; }
+          if (!confirm('Only clear this if the movement is genuinely pain-free, or a clinician has cleared you. Clear it?')) return;
+          resolvePainConcern(S, c.id, todayISO(), 'cleared by user in app');
+          entry.decision = decideForEx(ex, sess.checkin);
+          entry.sets = [];
+          const p2 = entry.decision.prescription;
+          for (let k = 0; k < (p2 ? p2.sets : ex.sets); k++) {
+            entry.sets.push(newSet(p2 ? { weight: p2.load, reps: p2.repsHigh } : { weight: null, reps: ex.hi }));
+          }
+          persist(); renderTrain(); toast('Concern cleared');
+        }
+      };
+      opts.appendChild(b);
+    });
+    body.appendChild(opts);
+    card.appendChild(body);
+    return card;   // no sets, no tick, no timer — paused means paused
+  }
 
   // previous / target / actual
   const last = lastPerformance(S, entry.variantId, ex);
@@ -1073,6 +1155,12 @@ function renderProfile() {
   g.appendChild(numField('Max load jump (%)', P.maxLoadJumpPct, 1, v => P.maxLoadJumpPct = v));
   g.appendChild(numField('Treat as a break after (days)', P.returnBreakDays, 1, v => P.returnBreakDays = v));
 
+  const prog = currentProgram();
+  g.appendChild(el('p','dim',
+    `<b style="color:var(--text)">Your programme:</b> ${esc(prog.explain)}` +
+    (prog.notes && prog.notes.length ? '<br>' + prog.notes.map(esc).join('<br>') : '')));
+  g.lastChild.style.cssText = 'font-size:.82rem;margin:12px 0 0;line-height:1.5';
+
   const eq = $('#profEquip'); eq.innerHTML = '';
   Object.keys(P.equipment).forEach(k => {
     const b = el('button', null, k.replace(/([A-Z])/g,' $1')); b.type = 'button';
@@ -1268,7 +1356,33 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
       `${S.sessions.length} sessions were rebuilt from week-numbered logs into dated sessions. Records were recalculated from the actual sets. Dates for migrated sessions are estimated where the old data had no timestamp.`);
   }
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    window.addEventListener('load', async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('sw.js');
+        const offer = worker => {
+          if (!worker) return;
+          // Never swap code out from under a running workout.
+          if (currentSession()) {
+            S._updateWaiting = true;
+            toast('Update ready — it will apply after this workout', 'warn');
+            return;
+          }
+          if (confirm('A new version of Recomp is ready. Reload to apply it?')) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          } else { S._updateWaiting = true; }
+        };
+        if (reg.waiting) offer(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener('statechange', () => { if (nw.state === 'installed' && reg.waiting) offer(reg.waiting); });
+        });
+        let reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloading) return; reloading = true; location.reload();
+        });
+      } catch (e) {}
+    });
   }
 })();
 
@@ -1276,6 +1390,10 @@ window.__recomp = {
   get S() { return S; }, set S(v) { S = v; },
   go, renderAll, startTimer, decideForEx, persist,
   EXERCISES, EX_INDEX, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
-  makeBackup, validateBackup, migrate, LEGACY_ID_MAP
+  makeBackup, validateBackup, migrate, LEGACY_ID_MAP,
+  currentProgram, rosterFor, startSession, finishSession, nextDay,
+  acceptDeload, dismissDeload, inDeload, applySessionPlan, buildProgram,
+  openConcernFor, resolvePainConcern, syncPainConcerns,
+  paused_variant: null
 };
 })();

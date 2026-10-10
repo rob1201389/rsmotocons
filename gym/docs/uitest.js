@@ -122,10 +122,31 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
   });
 
   sec('TRAIN — previous / target / actual, one-tap confirm');
-  t('exercises render with figures and prescriptions', () => {
-    const cards = d.querySelectorAll('#exList .ex');
-    ok(cards.length >= 8, 'got ' + cards.length + ' exercises');
+  t('the roster matches the generated programme, not a fixed list', () => {
+    const sess = A().S.sessions.find(s => s.status === 'in_progress');
+    const prog = A().currentProgram();
+    const day = prog.days[(sess.dayId - 1) % prog.days.length];
+    eq(d.querySelectorAll('#exList .ex').length, sess.entries.length);
+    eq(sess.entries.length, day.exercises.length, 'session does not match the programme day');
     ok(d.querySelector('#exList .fig svg, #exList svg.fig'), 'no figure rendered');
+  });
+  t('session length drives how many exercises are programmed', () => {
+    const before = A().currentProgram().perDay;
+    A().S.profile.sessionMinutes = 30;
+    const short = A().currentProgram().perDay;
+    A().S.profile.sessionMinutes = 90;
+    const long = A().currentProgram().perDay;
+    A().S.profile.sessionMinutes = 60;
+    A().currentProgram();
+    ok(short < long, `30 min gave ${short}, 90 min gave ${long}`);
+  });
+  t('training days per week changes the number of programme days', () => {
+    A().S.profile.trainingDaysPerWeek = 3;
+    eq(A().currentProgram().days.length, 3);
+    A().S.profile.trainingDaysPerWeek = 5;
+    eq(A().currentProgram().days.length, 5);
+    A().S.profile.trainingDaysPerWeek = 4;
+    eq(A().currentProgram().days.length, 4);
   });
   t('each card shows previous, target and actual', () => {
     click(w, d.querySelector('#exList .ex-hd'));
@@ -191,8 +212,10 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
     const rest = btns.find(b => /Rest/.test(b.textContent));
     click(w, rest);
     ok(d.querySelector('#timer').classList.contains('on'), 'timer not open');
+    const sess = A().S.sessions.find(s => s.status === 'in_progress');
+    const firstEx = A().EX_INDEX[sess.entries[0].variantId];
     const n = parseInt(d.querySelector('#tmNum').textContent, 10);
-    ok(n > 100, 'expected a long rest for a compound, got ' + n);
+    eq(n, firstEx.restSec, 'timer did not use the exercise\'s own rest period');
   });
   t('timer survives a full re-render of the exercise list', () => {
     const before = d.querySelector('#tmNum').textContent;
@@ -257,6 +280,79 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
     const d2 = A().decideForEx(ex, null);
     ok(['progress','hold'].includes(d2.action), d2.action);
     ok(d2.explain.why.length > 20, 'no real explanation');
+  });
+
+  sec('DEFECT FIXES — visible in the workout, not just the engine');
+
+  t('a fresh session can be started for the defect checks', () => {
+    A().startSession(A().nextDay(), null);
+    ok(A().S.sessions.find(s => s.status === 'in_progress'), 'no live session');
+  });
+
+  t('a concerning pain report genuinely pauses the exercise in the UI', () => {
+    const sess = A().S.sessions.find(s => s.status === 'in_progress');
+    const entry = sess.entries[0];
+    const ex = A().EX_INDEX[entry.variantId];
+    entry.feedback = { effort:'manageable', reserve:'3', technique:'controlled', capacity:'enough',
+      pain: { present:true, location:'knee', severity:2, sharp:true }, at: Date.now() };
+    // complete it so the report is part of history, then re-decide
+    sess.status = 'completed';
+    A().syncPainConcerns(A().S);
+    const dec = A().decideForEx(ex, null);
+    eq(dec.action, 'review', 'sharp pain rated 2 did not pause');
+    eq(dec.prescription, null);
+    ok(dec.paused === true);
+    sess.status = 'in_progress';
+    // re-decide the live entry so the card reflects the pause
+    sess.entries[0].decision = dec;
+    A().paused_variant = entry.variantId;
+  });
+
+  t('a paused exercise shows no set rows and no tick', () => {
+    A().renderAll();
+    const paused = [...d.querySelectorAll('#exList .ex')].find(c => c.classList.contains('paused'));
+    ok(paused, 'no paused card rendered');
+    eq(paused.querySelectorAll('.tick').length, 0, 'a paused exercise still offered a tick to log');
+    eq(paused.querySelectorAll('.setrow').length, 0, 'a paused exercise still showed set rows');
+    ok(/does not diagnose/.test(paused.textContent));
+  });
+
+  t('the pause offers substitute, skip and clear', () => {
+    const paused = [...d.querySelectorAll('#exList .ex')].find(c => c.classList.contains('paused'));
+    const labels = [...paused.querySelectorAll('.mediabar .btn')].map(b => b.textContent);
+    ok(labels.some(l => /Train something else/i.test(l)), labels.join('|'));
+    ok(labels.some(l => /Skip/i.test(l)), labels.join('|'));
+    ok(labels.some(l => /resolved/i.test(l)), labels.join('|'));
+  });
+
+  t('the concern survives a later clean session until cleared', () => {
+    const c = A().openConcernFor(A().S, A().paused_variant);
+    ok(c, 'concern not retained');
+    eq(c.status, 'open');
+    A().resolvePainConcern(A().S, c.id, '2026-10-20', 'test clear');
+    eq(A().openConcernFor(A().S, c.variantId), null, 'concern not cleared');
+  });
+
+  t('a short check-in actually shortens the roster, and the banner matches', () => {
+    const full = A().rosterFor(1);
+    const res = A().applySessionPlan(full, { timeAvailableMin: 20 }, A().S.profile);
+    ok(res.kept.length < full.length, 'roster not shortened');
+    ok(res.explain.what.includes(String(res.kept.length)), res.explain.what);
+    res.kept.forEach(k => ok(!res.dropped.some(x => x.id === k.id), 'exercise both kept and dropped'));
+  });
+
+  t('an accepted deload changes the prescribed load and is dated', () => {
+    const ex = A().EX_INDEX['bench-barbell'];
+    const before = A().decideForEx(ex, null);
+    const dl = A().acceptDeload(A().S, new Date().toISOString().slice(0,10));
+    ok(dl.startDate && dl.endDate, 'deload has no explicit window');
+    const during = A().decideForEx(ex, null);
+    if (before.prescription && during.prescription) {
+      ok(during.prescription.load < before.prescription.load,
+        `deload did not lighten the load: ${before.prescription.load} -> ${during.prescription.load}`);
+    }
+    ok(during.flags.includes('deload'));
+    delete A().S.activeDeload;
   });
 
   sec('PROGRESS — honest empty states and dated trends');

@@ -244,3 +244,55 @@ Object.assign(LIFTS, {
     b:{hip:[116,88],spine:188,neck:194,thigh:70,shin:40,foot:0,thighF:72,shinF:42,footF:0,
        armU:180,armF:184,armUF:182,armFF:186,bend:-8} }
 });
+
+/* ---------------------------------------------------------------------------
+   Front-view poses. These movements happen in the frontal plane: drawn from
+   the side they read as a completely different exercise, which the independent
+   review flagged as misleading. `front:true` gives the figure two shoulders
+   and two hips so both limbs are visible doing their actual job.
+   ------------------------------------------------------------------------ */
+Object.assign(LIFTS, {
+  /* Lateral raise: both arms sweep out and up to shoulder height. */
+  lat_front:{ ms:2200, ground:['near.toe','far.toe'],
+    a:{front:true,bodyWidth:13,hip:[100,62],spine:270,neck:270,prop:'db2',
+       armU:80,armF:82,armUF:100,armFF:98,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0},
+    b:{front:true,bodyWidth:13,hip:[100,62],spine:270,neck:270,prop:'db2',
+       armU:5,armF:2,armUF:175,armFF:178,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0} },
+
+  /* Face pull: rope to the forehead, hands separating wide. */
+  facepull_front:{ ms:2200, ground:['near.toe','far.toe'],
+    a:{front:true,bodyWidth:13,hip:[100,62],spine:270,neck:270,anchor:[100,20],
+       armU:340,armF:338,armUF:200,armFF:202,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0},
+    b:{front:true,bodyWidth:16,hip:[100,62],spine:270,neck:270,anchor:[100,20],
+       armU:5,armF:310,armUF:175,armFF:230,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0} },
+
+  /* Cable fly: arms sweep from wide to together in front of the chest. */
+  fly_front:{ ms:2400, ground:['near.toe','far.toe'],
+    a:{front:true,bodyWidth:13,hip:[100,64],spine:272,neck:272,
+       armU:350,armF:348,armUF:190,armFF:192,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0},
+    b:{front:true,bodyWidth:13,hip:[100,64],spine:272,neck:272,
+       armU:28,armF:30,armUF:152,armFF:150,thigh:92,shin:90,foot:0,thighF:88,shinF:90,footF:0,bend:0} },
+
+  /* Pallof press: half-kneeling, hands press straight out from the chest. */
+  pallof_front:{ ms:2400, ground:['near.toe','far.knee'],
+    a:{front:true,bodyWidth:12,hip:[100,72],spine:268,neck:268,anchor:[170,60],
+       armU:20,armF:18,armUF:160,armFF:162,
+       thigh:28,shin:96,foot:0,thighF:128,shinF:252,footF:268,bend:0},
+    b:{front:true,bodyWidth:12,hip:[100,72],spine:268,neck:268,anchor:[170,60],
+       armU:2,armF:0,armUF:178,armFF:180,
+       thigh:28,shin:96,foot:0,thighF:128,shinF:252,footF:268,bend:0} },
+
+  /* Landmine rotation: bar end swings in an arc across the body. */
+  landmine_front:{ ms:2400, ground:['near.toe','far.toe'],
+    a:{front:true,bodyWidth:13,hip:[100,64],spine:272,neck:272,anchor:[40,106],prop:'bar',
+       armU:330,armF:328,armUF:200,armFF:198,thigh:94,shin:90,foot:0,thighF:86,shinF:90,footF:0,bend:0},
+    b:{front:true,bodyWidth:13,hip:[100,64],spine:272,neck:272,anchor:[40,106],prop:'bar',
+       armU:300,armF:298,armUF:238,armFF:236,thigh:94,shin:90,foot:0,thighF:86,shinF:90,footF:0,bend:0} },
+
+  /* Farmer's walk seen from the front: load either side, body stays level. */
+  farmer_front:{ ms:1600, ground:['near.toe','far.toe'],
+    a:{front:true,bodyWidth:13,hip:[100,62],spine:270,neck:270,prop:'db2',
+       armU:88,armF:88,armUF:92,armFF:92,thigh:84,shin:92,foot:0,thighF:96,shinF:88,footF:0,bend:0},
+    b:{front:true,bodyWidth:13,hip:[100,60],spine:270,neck:270,prop:'db2',
+       armU:88,armF:88,armUF:92,armFF:92,thigh:96,shin:88,foot:0,thighF:84,shinF:92,footF:0,bend:0} }
+});
