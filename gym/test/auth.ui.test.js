@@ -510,6 +510,9 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
     ok(/Waiting for an administrator/.test(text($(b, '#stApprovalStep'))));
     ok($(b, '#stResend').hidden);
     ok(!$(b, '#stLogout').hidden);
+    // .btn sets display, so the stylesheet must still honour [hidden] (a real bug caught in screenshots).
+    eq(b.w.getComputedStyle($(b, '#stResend')).display, 'none');
+    eq(b.w.getComputedStyle($(b, '#stBack')).display, 'none');
   });
   await t('a private endpoint answers 403 code pending, and the client reports pending (not forbidden)', async () => {
     const r = await b.w.AUTH.pullState();

@@ -343,7 +343,7 @@ section[hidden]{display:none}
 body.locked{overflow:hidden;padding:0}
 body.locked>*:not(#authGate){display:none!important}
 .authgate{position:fixed;inset:0;z-index:200;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch}
-.authgate[hidden]{display:none}
+.authgate[hidden],.authgate [hidden]{display:none!important}
 .aw{position:relative;isolation:isolate;min-height:100%;display:flex;flex-direction:column}
 .aw[hidden]{display:none}
 .aw::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
@@ -401,14 +401,17 @@ body.locked>*:not(#authGate){display:none!important}
   .adlg{width:min(440px,100%);max-height:min(100%,760px);border:1px solid var(--line);border-radius:var(--r-l);
     box-shadow:0 24px 70px rgba(0,0,0,.45)}
 }
+@keyframes adlgUp{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes adlgPop{from{transform:scale(.97);opacity:0}to{transform:none;opacity:1}}
+@keyframes adlgFade{from{opacity:0}to{opacity:1}}
+@keyframes adlgSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:no-preference){
   .adlg{animation:adlgUp .22s var(--ease)}
   .adlg-scrim{animation:adlgFade .22s var(--ease)}
-  @keyframes adlgUp{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
-  @keyframes adlgFade{from{opacity:0}to{opacity:1}}
-  @media (min-width:600px){ .adlg{animation-name:adlgPop} @keyframes adlgPop{from{transform:scale(.97);opacity:0}to{transform:none;opacity:1}} }
   .btn.busy::after{content:"";width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:adlgSpin .7s linear infinite}
-  @keyframes adlgSpin{to{transform:rotate(360deg)}}
+}
+@media (prefers-reduced-motion:no-preference) and (min-width:600px){
+  .adlg{animation-name:adlgPop}
 }
 
 .atabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin:6px 0 18px;

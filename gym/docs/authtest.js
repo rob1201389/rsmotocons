@@ -107,7 +107,8 @@ await t('mismatched new passwords are refused client-side', async () => {
   b1.d.querySelector('#pwConfirm').value = 'Alice-Different-9';
   b1.d.querySelector('#pwForm').dispatchEvent(new b1.w.Event('submit', { bubbles: true, cancelable: true }));
   await wait(300);
-  ok(!b1.d.querySelector('#pwError').hidden, 'no error shown');
+  /* The pop-up reports a mismatch beside the field, not in the form-level alert. */
+  ok(!b1.d.querySelector('#pwConfirm-err').hidden, 'no error shown');
 });
 await t('setting the new password opens the app', async () => {
   b1.d.querySelector('#pwCurrent').value = 'Alice-Temp-Passphrase-1';

@@ -69,7 +69,7 @@ const Admin = (function () {
   const CSS = `
 .adm{position:fixed;inset:0;z-index:150;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   height:100dvh;padding-top:env(safe-area-inset-top)}
-.adm[hidden]{display:none}
+.adm [hidden],.adm[hidden]{display:none!important}
 .adm *{box-sizing:border-box}
 .adm-hd{flex:none;display:flex;align-items:center;gap:8px;padding:8px var(--gut);border-bottom:1px solid var(--line);
   background:color-mix(in srgb,var(--bg) 92%,transparent)}
@@ -117,7 +117,7 @@ const Admin = (function () {
 .adm-f textarea{min-height:88px;resize:vertical}
 .adm-f .hint{font-size:.8rem;color:var(--dim);margin:5px 0 0}
 fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
-.adm-perm{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);min-height:44px;cursor:pointer}
+.adm-f label.adm-perm{display:flex;gap:12px;align-items:flex-start;margin:0;padding:9px 0;border-bottom:1px solid var(--line);min-height:44px;cursor:pointer;font-weight:400}
 .adm-perm:last-child{border-bottom:0}
 .adm-perm input{flex:none;width:22px;height:22px;margin:1px 0 0;accent-color:var(--accent)}
 .adm-perm span{display:block;font-weight:600;font-size:.92rem}
