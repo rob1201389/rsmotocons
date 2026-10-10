@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Recomp gym app at gym.rsmotocons.com. A separate worker from the main
+  // site so its headers (inline script, Google Fonts) never touch the site CSP.
+  "name": "rsmotocons-gym",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "gym.rsmotocons.com", "custom_domain": true }],
+  "assets": { "directory": "./public" }
+}
