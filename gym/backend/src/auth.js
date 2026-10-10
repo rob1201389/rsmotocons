@@ -120,7 +120,7 @@ export async function login(db, email, password, ip, ua, now) {
   }
   const user = await db.get('SELECT * FROM users WHERE email = ?', (email || '').toLowerCase());
   // Always run a verification so the timing does not reveal whether the account exists.
-  const stored = user ? user.password_hash : 'pbkdf2$600000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const stored = user ? user.password_hash : 'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
   const good = await verifyPassword(password || '', stored);
   if (!user || !good) {
     await noteAttempt(db, key, false, now);

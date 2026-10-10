@@ -2,7 +2,11 @@
    on Cloudflare Workers and on Node. No secrets are ever stored in the app
    bundle — the bootstrap password comes from a server-side environment value. */
 
-const PBKDF2_ITERATIONS = 600000;   // OWASP guidance for PBKDF2-HMAC-SHA256
+/* Cloudflare Workers refuse PBKDF2 above 100,000 iterations (the call throws),
+   so that is the ceiling here. OWASP's figure for PBKDF2-HMAC-SHA256 is 600,000;
+   the shortfall is covered by the password policy and login rate limiting. The
+   count is stored in each hash, so raising it later needs no migration. */
+const PBKDF2_ITERATIONS = 100000;
 const KEY_BITS = 256;
 
 const enc = new TextEncoder();
