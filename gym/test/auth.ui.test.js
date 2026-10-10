@@ -853,14 +853,15 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
     eq($$(ad, '#admPerms input').map(i => i.checked), [true, true, false, false, false, true, true]);
   });
   await t('Approve sends the exact decision body: role, every permission, and the private note', async () => {
-    const reviews = $(ad, '#admPerms input[data-feature="reviews"]'); reviews.checked = false;
-    reviews.dispatchEvent(new ad.w.Event('change', { bubbles: true }));
+    const reviews = $(ad, '#admPerms input[data-feature="reviews"]');
+    ok(reviews.disabled && reviews.checked, 'weekly reviews are always on and cannot be unticked');
+    reviews.checked = false; reviews.dispatchEvent(new ad.w.Event('change', { bubbles: true }));   // even a forced untick is ignored
     const dn = $(ad, '#admDecisionNote'); dn.value = '  Paid up  '; dn.dispatchEvent(new ad.w.Event('input', { bubbles: true }));
     click(ad, '#admApprove');
     await until(() => ad.srv.last('POST', '/api/admin/requests/sr1/decision'), 'decision');
     const c = ad.srv.last('POST', '/api/admin/requests/sr1/decision');
     eq(c.body, { action: 'approve', role: 'coach',
-      permissions: { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: false },
+      permissions: { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: true },
       note: 'Paid up' });
     eq(c.headers['X-Recomp-Request'], '1');
     ok(!('overrideVerification' in c.body));

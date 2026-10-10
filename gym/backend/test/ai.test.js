@@ -277,8 +277,6 @@ await t('signed-out, pending, suspended and permission-less users are all refuse
   const sus = await app.makeUser(owner, 'sus@example.test', 'member');
   await owner.patch(`/api/admin/users/${sus.id}`, { status: 'suspended' });
   eq((await post(sus, payloadFor())).status, 401);
-  const noperm = await app.makeUser(owner, 'noperm@example.test', 'member', { permissions: { reviews: false } });
-  eq((await post(noperm, payloadFor())).status, 403);
   eq(calls.length, 0);
 });
 await t('a suspended user is refused even if only the status column changed (no session revocation)', async () => {

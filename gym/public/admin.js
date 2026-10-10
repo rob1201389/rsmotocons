@@ -22,8 +22,10 @@ const Admin = (function () {
     ['recipes',   'Recipes', 'Recipes and meal planning'],
     ['garmin',    'Garmin import', 'Bring in Garmin data'],
     ['progress',  'Progress', 'Charts and records'],
-    ['reviews',   'Workout reviews', 'Send and receive reviews']
+    ['reviews',   'Weekly reviews', 'Weekly check-in, coach report and reviews']
   ];
+  /* Mirrors ALWAYS_ON in rbac.js: everyone gets weekly reviews. */
+  const ALWAYS_ON = ['reviews'];
   const PRESETS = {
     member: { training: true, library: true, nutrition: true, recipes: true, garmin: true, progress: true, reviews: true },
     coach:  { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: true }
@@ -417,9 +419,10 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
 
       const fs = h('fieldset', { class: 'adm-f', id: 'admPerms' }, h('legend', { text: 'Features this person can use' }));
       FEATURES.forEach(([key, label, desc]) => {
+        const always = ALWAYS_ON.includes(key);
         fs.appendChild(h('label', { class: 'adm-perm' },
-          h('input', { type: 'checkbox', 'data-feature': key, checked: !!f.perms[key], onchange: ev => { f.perms[key] = ev.target.checked; f.permsTouched = true; } }),
-          h('div', null, h('span', { text: label }), h('small', { text: desc }))));
+          h('input', { type: 'checkbox', 'data-feature': key, checked: always || !!f.perms[key], disabled: always, onchange: ev => { f.perms[key] = ev.target.checked; f.permsTouched = true; } }),
+          h('div', null, h('span', { text: label }), h('small', { text: always ? desc + '. Always on for everyone.' : desc }))));
       });
       card.appendChild(fs);
 
@@ -514,7 +517,7 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
     if (action === 'approve') {
       b.role = f.role;
       b.permissions = {};
-      FEATURES.forEach(([k]) => { b.permissions[k] = !!f.perms[k]; });
+      FEATURES.forEach(([k]) => { b.permissions[k] = ALWAYS_ON.includes(k) || !!f.perms[k]; });
       const n = f.decisionNote.trim(); if (n) b.note = n;
     } else {
       const n = f.reason.trim(); if (n) b.note = n;

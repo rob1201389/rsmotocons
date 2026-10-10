@@ -16,6 +16,10 @@ export const FEATURES = [
   'reviews'      // workout reviews
 ];
 
+/* Features every account has, whatever its role or overrides: weekly reviews are
+   part of how the plan adapts, so no one can be switched off from them. */
+export const ALWAYS_ON = ['reviews'];
+
 /* Sensible presets. A per-user override wins over its role's preset. */
 export const PRESETS = {
   owner:  { training:true,  library:true,  nutrition:true,  recipes:true,  garmin:true,  progress:true,  reviews:true },
@@ -29,7 +33,7 @@ export function effectivePermissions(user) {
   let over = {};
   try { over = user.permissions ? JSON.parse(user.permissions) : {}; } catch (e) { over = {}; }
   const out = {};
-  FEATURES.forEach(f => { out[f] = (f in over) ? !!over[f] : !!base[f]; });
+  FEATURES.forEach(f => { out[f] = ALWAYS_ON.includes(f) ? true : (f in over) ? !!over[f] : !!base[f]; });
   return out;
 }
 

@@ -27,10 +27,9 @@ await t('no assigned coach => 409 no_coach and nothing stored', async () => {
 });
 await assign(coach, alice); await assign(coach, carol); await assign(coach2, bob);
 await assign(coach2, dave);
-await t('signed-out and permission-less users are refused', async () => {
+await t('signed-out users are refused; a reviews override of false is ignored', async () => {
   eq((await app.client().post('/api/weekly-submissions', { weekStart: W1, report: report() })).status, 401);
-  eq((await submit(dave, W1)).status, 403);
-  eq((await dave.c.fetch('/api/weekly-submissions')).status, 403);
+  eq((await dave.c.fetch('/api/weekly-submissions')).status, 200);
 });
 await t('a valid submission is stored against the assigned coach', async () => {
   const r = await submit(alice, W1);
@@ -92,9 +91,9 @@ await t('members, unassigned admins and the owner see an empty or refused inbox,
   const own = await owner.fetch('/api/weekly-submissions');
   eq(own.data.submissions, []);
 });
-await t('a coach without the reviews permission is refused the inbox', async () => {
+await t('reviews cannot be switched off for a coach either', async () => {
   const c3 = await app.makeUser(owner, 'coach3@example.test', 'coach', { permissions: { reviews: false } });
-  eq((await c3.c.fetch('/api/weekly-submissions?inbox=1')).status, 403);
+  eq((await c3.c.fetch('/api/weekly-submissions?inbox=1')).status, 200);
 });
 
 sec('DECIDING');

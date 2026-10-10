@@ -418,10 +418,10 @@ await t('removing training access blocks the state endpoint directly', async () 
   await owner.fetch('/api/admin/users/' + BOB, { method: 'PATCH', body: { permissions: { training: true } } });
 });
 
-await t('removing reviews access blocks submitting a review', async () => {
+await t('reviews cannot be switched off: an override to false is ignored', async () => {
   await owner.fetch('/api/admin/users/' + BOB, { method: 'PATCH', body: { permissions: { reviews: false } } });
-  const r = await bob.fetch('/api/reviews', { method: 'POST', body: { comment: 'x' } });
-  eq(r.status, 403);
+  const r = await bob.fetch('/api/reviews');
+  eq(r.status, 200);
   await owner.fetch('/api/admin/users/' + BOB, { method: 'PATCH', body: { permissions: { reviews: true } } });
 });
 

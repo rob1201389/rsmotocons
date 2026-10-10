@@ -269,9 +269,10 @@ await t('approval activates the account, applies role and permissions, and the o
   eq(u.status, 'active'); eq(u.role, 'coach'); ok(u.approved_at); eq(u.approved_by, adminU.id);
   eq(JSON.parse(u.permissions), { nutrition: true, reviews: false });
   const me = await s.c.fetch('/api/auth/me');
-  eq(me.data.user.accountState, 'active'); eq(me.data.user.permissions.nutrition, true); eq(me.data.user.permissions.reviews, false);
+  eq(me.data.user.accountState, 'active'); eq(me.data.user.permissions.nutrition, true);
+  eq(me.data.user.permissions.reviews, true, 'weekly reviews are always on');
   eq((await s.c.fetch('/api/state')).status, 200);
-  eq((await s.c.fetch('/api/reviews')).status, 403, 'a revoked feature must stay revoked');
+  eq((await s.c.fetch('/api/reviews')).status, 200, 'reviews stay available whatever the override');
   const sr = db.get('SELECT * FROM signup_requests WHERE id = ?', s.sr.id);
   eq(sr.status, 'approved'); eq(sr.decided_by, adminU.id); eq(sr.decision_note, 'welcome');
 });
