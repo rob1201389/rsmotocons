@@ -9,7 +9,7 @@
 
 import { newId, sha256hex } from './crypto.js';
 import { sessionFromRequest, login, changePassword, revokeAllSessions, revokeSession,
-         sessionCookie, clearCookie, readCookie, audit, setupAvailable, claimOwner } from './auth.js';
+         sessionCookie, clearCookie, readCookie, audit, setupAvailable, claimOwner, normLogin } from './auth.js';
 import { can, isOwner, isAdmin, isReviewer, effectivePermissions, mayAccessUserData,
          FEATURES, ROLES } from './rbac.js';
 
@@ -310,8 +310,8 @@ export async function handle(req, ctx) {
 
     if (path === '/api/admin/users' && req.method === 'POST') {
       const b = await body(req);
-      const email = String(b.email || '').trim().toLowerCase();
-      if (!email || !/^[^@\s]+@[^@\s]+$/.test(email)) return err(400, 'A valid login email is required.');
+      const email = normLogin(b.email);
+      if (email.length < 3 || email.length > 80) return err(400, 'A login of 3 to 80 characters is required.');
       if (b.role && !ROLES.includes(b.role)) return err(400, 'Unknown role.');
       if ((b.role === 'owner' || b.role === 'admin') && !isOwner(user)) {
         return err(403, 'Only the owner can create administrators.');

@@ -1420,7 +1420,7 @@ function showGate(view, opts) {
     : view === 'setup' ? 'Set up your account' : 'Sign in';
   $('#authSub').textContent =
     view === 'password' ? 'This replaces the temporary password you were given.'
-    : view === 'setup' ? 'First time only. Use your owner email and choose your own password.'
+    : view === 'setup' ? 'First time only. Enter your login and choose your own password.'
     : view === 'blocked' ? ''
     : 'Your training data is private to your account.';
   if (view === 'blocked') $('#authBlockedMsg').textContent = opts.message || '';

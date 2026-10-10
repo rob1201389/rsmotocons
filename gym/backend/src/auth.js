@@ -7,6 +7,11 @@ const MAX_ATTEMPTS = 10;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const COOKIE = 'recomp_session';
 
+/* A login is any short name, not necessarily an email: trimmed, lowercased,
+   inner spaces collapsed, so "RS  Motocons" and "rs motocons" are the same login. */
+export const normLogin = s => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+const ownerLogin = env => normLogin(env.OWNER_LOGIN || env.OWNER_EMAIL);
+
 export async function audit(db, actor, action, targetId, detail, ip) {
   await db.run(
     'INSERT INTO audit_log (at, actor_id, actor_email, action, target_id, detail, ip) VALUES (?,?,?,?,?,?,?)',
@@ -118,7 +123,7 @@ export async function bootstrapOwner(db, env, now) {
    the password is typed once, here, and only its hash is kept. The window shuts
    permanently the moment an owner exists. */
 export async function setupAvailable(db, env) {
-  if (!(env.OWNER_EMAIL || '').trim()) return false;
+  if (!ownerLogin(env)) return false;
   const existing = await db.get("SELECT id FROM users WHERE role = 'owner'");
   return !existing;
 }
@@ -131,12 +136,12 @@ export async function claimOwner(db, env, email, password, ip, ua, now) {
   if (!(await setupAvailable(db, env))) {
     return { ok: false, status: 409, error: 'Setup is not available. Sign in instead.' };
   }
-  const ownerEmail = (env.OWNER_EMAIL || '').trim().toLowerCase();
-  const given = (email || '').trim().toLowerCase();
+  const ownerEmail = ownerLogin(env);
+  const given = normLogin(email);
   if (!given || given !== ownerEmail) {
     await noteAttempt(db, key, false, now);
     await audit(db, null, 'setup.refused_email', null, null, ip);
-    return { ok: false, status: 403, error: 'That email is not allowed to set up this app.' };
+    return { ok: false, status: 403, error: 'That login is not allowed to set up this app.' };
   }
   const problems = passwordProblems(password);
   if (problems.length) {
@@ -155,19 +160,19 @@ export async function claimOwner(db, env, email, password, ip, ua, now) {
 }
 
 export async function login(db, email, password, ip, ua, now) {
-  const key = `${(email || '').toLowerCase()}|${ip || 'noip'}`;
+  const key = `${normLogin(email)}|${ip || 'noip'}`;
   if (await rateLimited(db, key, now)) {
     await audit(db, null, 'auth.rate_limited', null, { email }, ip);
     return { ok: false, status: 429, error: 'Too many attempts. Try again in 15 minutes.' };
   }
-  const user = await db.get('SELECT * FROM users WHERE email = ?', (email || '').toLowerCase());
+  const user = await db.get('SELECT * FROM users WHERE email = ?', normLogin(email));
   // Always run a verification so the timing does not reveal whether the account exists.
   const stored = user ? user.password_hash : 'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
   const good = await verifyPassword(password || '', stored);
   if (!user || !good) {
     await noteAttempt(db, key, false, now);
     await audit(db, null, 'auth.login_failed', user ? user.id : null, { email }, ip);
-    return { ok: false, status: 401, error: 'Email or password is incorrect.' };
+    return { ok: false, status: 401, error: 'Login or password is incorrect.' };
   }
   if (user.status !== 'active') {
     await noteAttempt(db, key, false, now);

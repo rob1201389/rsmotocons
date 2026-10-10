@@ -84,20 +84,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # The owner chooses their own password in the app the first time; only
-      # their email is configured here. Skipped until GYM_OWNER_EMAIL exists.
-      - name: Gym app owner email
-        working-directory: gym
-        run: |
-          if [ -z "$GYM_OWNER_EMAIL" ]; then
-            echo "GYM_OWNER_EMAIL not set; skipping."; exit 0
-          fi
-          printf '%s' "$GYM_OWNER_EMAIL" | npx --yes wrangler@4 secret put OWNER_EMAIL
-        env:
-          GYM_OWNER_EMAIL: ${{ secrets.GYM_OWNER_EMAIL }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       # Worth knowing: `wrangler deploy` does not touch secrets. DATA_KEY,
       # SESSION_SECRET, DRIVER_PIN and ADMIN_PASSWORD keep their current
       # values, because they are set on the worker and not in wrangler.jsonc.
