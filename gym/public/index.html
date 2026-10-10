@@ -309,11 +309,66 @@ section[hidden]{display:none}
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
+<!-- ============================= auth gate ============================== -->
+<div id="authGate" class="authgate" hidden>
+  <div class="authcard">
+    <div class="authbrand">
+      <span class="eyebrow">Recomp</span>
+      <h1 id="authHeading">Sign in</h1>
+      <p class="muted" id="authSub">Your training data is private to your account.</p>
+    </div>
+
+    <form id="loginForm" autocomplete="on">
+      <div class="authfield">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" type="email" name="email" autocomplete="username"
+               inputmode="email" autocapitalize="none" spellcheck="false" required>
+      </div>
+      <div class="authfield">
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+      <p class="autherr" id="loginError" role="alert" hidden></p>
+      <button class="btn primary block lg" id="loginBtn" type="submit">Sign in</button>
+    </form>
+
+    <form id="pwForm" hidden autocomplete="on">
+      <p class="banner" style="margin-bottom:12px">
+        <span>Choose a new password before you continue. The one you were given is temporary.</span></p>
+      <div class="authfield">
+        <label for="pwCurrent">Current password</label>
+        <input id="pwCurrent" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="authfield">
+        <label for="pwNext">New password</label>
+        <input id="pwNext" type="password" autocomplete="new-password" required>
+        <span class="dim" style="font-size:.78rem">At least 12 characters, with a digit and an uppercase letter or symbol.</span>
+      </div>
+      <div class="authfield">
+        <label for="pwConfirm">Repeat new password</label>
+        <input id="pwConfirm" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="autherr" id="pwError" role="alert" hidden></p>
+      <button class="btn primary block lg" id="pwBtn" type="submit">Set password and continue</button>
+    </form>
+
+    <div id="authBlocked" hidden>
+      <p class="banner bad" id="authBlockedMsg"></p>
+      <button class="btn ghost block" id="authBackBtn">Back to sign in</button>
+    </div>
+
+    <p class="dim authfoot" id="authFoot"></p>
+  </div>
+</div>
+
+
 <header class="top">
   <div class="top-in">
     <h1 id="screenTitle">Today</h1>
     <span class="badge" id="storeBadge" title="Where your data is stored">…</span>
     <span class="badge" id="offlineBadge" hidden>Offline</span>
+    <button class="badge" id="acctBtn" hidden aria-haspopup="true">Account</button>
   </div>
 </header>
 
@@ -510,6 +565,7 @@ section[hidden]{display:none}
 <script src="core.js"></script>
 <script src="engine.js"></script>
 <script src="exercises.js"></script>
+<script src="authclient.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
