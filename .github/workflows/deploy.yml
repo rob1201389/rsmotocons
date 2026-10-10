@@ -47,6 +47,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # Recomp gym app at gym.rsmotocons.com: its own worker, config in gym/.
+      # The API token needs permission to create the custom domain (Workers
+      # Scripts edit plus DNS edit on the rsmotocons.com zone) on first run.
+      - name: Deploy gym app
+        working-directory: gym
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       # Worth knowing: `wrangler deploy` does not touch secrets. DATA_KEY,
       # SESSION_SECRET, DRIVER_PIN and ADMIN_PASSWORD keep their current
       # values, because they are set on the worker and not in wrangler.jsonc.
