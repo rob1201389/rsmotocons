@@ -1,0 +1,6 @@
+{
+  "name": "recomp-tests",
+  "private": true,
+  "description": "Test dependencies. The app itself has none.",
+  "devDependencies": { "jsdom": "^29.1.1" }
+}

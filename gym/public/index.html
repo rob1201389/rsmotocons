@@ -215,6 +215,39 @@ section[hidden]{display:none}
 .mediabar{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap}
 
 /* ------------------------------ sheet ----------------------------------- */
+
+/* ------------------------- progression panel --------------------------- */
+.prog{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:11px;margin:10px 0}
+.prog .p-head{font-family:var(--mono);font-weight:700;font-size:1.05rem}
+.prog .p-line{font-size:.88rem;margin-top:4px;color:var(--muted)}
+.prog .p-line b{color:var(--text)}
+.prog .meter{display:flex;gap:5px;margin:10px 0 4px}
+.prog .meter i{flex:1;height:8px;border-radius:99px;background:var(--line-strong)}
+.prog .meter i.on{background:var(--accent)}
+.prog .meter-l{font-size:.78rem;color:var(--muted)}
+.prog ul.req{list-style:none;margin:8px 0 0;padding:0}
+.prog ul.req li{display:flex;gap:8px;font-size:.84rem;padding:3px 0;line-height:1.35}
+.prog ul.req .ic{flex:0 0 1.2em;text-align:center;font-weight:700}
+.prog ul.req .met .ic{color:var(--accent)}
+.prog ul.req .unmet .ic{color:var(--alert)}
+.prog ul.req .unknown .ic{color:var(--muted)}
+.prog .p-next{margin-top:8px;font-size:.86rem;line-height:1.45}
+.prog .p-prev{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line-strong)}
+.prog .p-prev .t{font-weight:600}
+.prog .choice{margin-top:6px;font-size:.82rem;color:var(--muted)}
+.setrow .sn.bo{font-size:.62rem;letter-spacing:.05em}
+.ps-grid{display:grid;gap:12px;margin-top:10px}
+.ps-grid .fld2 label{display:block;font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;color:var(--muted);margin-bottom:4px}
+.ps-grid .fld2 input[type=text],.ps-grid .fld2 input[type=number],.ps-grid .fld2 select{
+  width:100%;min-height:var(--tap);background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong);
+  border-radius:var(--r-s);padding:9px 11px;font-size:1rem}
+.ps-grid .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ps-grid .hint{font-size:.76rem;color:var(--dim);margin-top:3px;line-height:1.35}
+.ps-grid .chk{display:flex;gap:10px;align-items:flex-start;font-size:.88rem}
+.ps-grid .chk input{margin-top:3px;width:20px;height:20px}
+.ps-errs{margin:10px 0 0;padding:10px;border-radius:var(--r-s);background:var(--alert-soft);border:1px solid var(--alert);font-size:.84rem}
+.ps-errs ul{margin:4px 0 0 18px;padding:0}
+
 .sheet{position:fixed;inset:0;z-index:70;display:none}
 .sheet.on{display:block}
 .sheet .scrim{position:absolute;inset:0;background:rgba(0,0,0,.6)}
@@ -544,6 +577,36 @@ section[hidden]{display:none}
     <div class="grab"></div>
     <div class="spread"><h2 id="detailTitle">Exercise</h2><button class="btn sm ghost" data-close>Close</button></div>
     <div id="detailBody"></div>
+  </div>
+</div>
+
+
+<!-- ======================== adjust today's prescription ================== -->
+<div class="sheet" id="pgSheet" role="dialog" aria-modal="true" aria-labelledby="pgTitle">
+  <div class="scrim" data-close></div>
+  <div class="panel">
+    <div class="grab"></div>
+    <div class="spread"><h2 id="pgTitle">Edit today's prescription</h2>
+      <button class="btn sm ghost" data-close>Cancel</button></div>
+    <p class="dim" style="font-size:.82rem;margin:6px 0 0">Your change is saved as yours, next to what the app recommended. The recommendation is not overwritten, and sets you have already logged are not touched.</p>
+    <div class="ps-grid" id="pgBody"></div>
+    <div id="pgErr"></div>
+    <button class="btn primary block" id="pgSave" style="margin-top:14px">Use these numbers</button>
+  </div>
+</div>
+
+<!-- ======================== exercise progression settings ================ -->
+<div class="sheet" id="psSheet" role="dialog" aria-modal="true" aria-labelledby="psTitle">
+  <div class="scrim" data-close></div>
+  <div class="panel">
+    <div class="grab"></div>
+    <div class="spread"><h2 id="psTitle">Progression settings</h2>
+      <button class="btn sm ghost" data-close>Cancel</button></div>
+    <p class="dim" style="font-size:.82rem;margin:6px 0 0">Stored for this exact variant only. Changing them never alters sessions you have already logged.</p>
+    <div class="ps-grid" id="psBody"></div>
+    <div id="psErr"></div>
+    <button class="btn primary block" id="psSave" style="margin-top:14px">Save settings</button>
+    <button class="btn ghost block" id="psReset" style="margin-top:8px">Reset to defaults</button>
   </div>
 </div>
 

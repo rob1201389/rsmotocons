@@ -317,11 +317,7 @@ function startSession(day, checkin) {
     const entry = newEntry(ex.id, ex.id);
     const d = decideForEx(ex, checkin);
     entry.decision = d;
-    const p = d.prescription;
-    const n = p ? p.sets : ex.sets;
-    for (let i = 0; i < n; i++) {
-      entry.sets.push(newSet(p ? { weight: p.load, reps: p.repsHigh } : { weight: null, reps: ex.hi }));
-    }
+    seedSets(entry, ex, d);
     sess.entries.push(entry);
   });
   if (S.deferred && S.deferred[day] && !plan.shortened) delete S.deferred[day];
@@ -332,6 +328,21 @@ function startSession(day, checkin) {
   persist();
   go('train');
   say(`${dayName(day)} started with ${sess.entries.length} exercises`);
+}
+/* Planned sets come from the prescription: each set gets ITS OWN target, and
+   back-off sets (if configured) follow as a separate role. Nothing here is
+   performance; every set stays pending until the user acts on it. */
+function seedSets(entry, ex, d) {
+  entry.sets = [];
+  const p = d.prescription;
+  const n = p ? p.sets : ex.sets;
+  for (let i = 0; i < n; i++) {
+    const t = p && p.setTargets && p.setTargets[i] != null ? p.setTargets[i] : (p ? p.repsHigh : Math.round((ex.lo + ex.hi) / 2));
+    entry.sets.push(newSet({ weight: p ? p.load : null, reps: t }));
+  }
+  if (p && p.backoff) for (let i = 0; i < p.backoff.sets; i++) {
+    entry.sets.push(newSet({ weight: p.backoff.load, reps: p.backoff.reps, role: 'backoff' }));
+  }
 }
 function decideForEx(ex, checkin) {
   S._exIndex = EX_INDEX;
@@ -594,7 +605,7 @@ function exCard(sess, entry, idx) {
   const tgt = p ? prescriptionText(p, ex) : 'Choose your load';
   nm.innerHTML = `<b>${esc(ex.name)}</b><span>${esc(tgt)}</span>`;
   hd.appendChild(nm);
-  if (d) hd.appendChild(el('span','pill ' + pillKind(d.action), actionLabel(d.action)));
+  if (d) hd.appendChild(el('span','pill ' + decisionKind(d), decisionLabel(d)));
   hd.appendChild(el('span','chev','▶'));
   hd.onclick = () => { openEx = (openEx === entry.variantId) ? null : entry.variantId; renderTrain(); };
   card.appendChild(hd);
@@ -622,11 +633,8 @@ function exCard(sess, entry, idx) {
           if (!confirm('Only clear this if the movement is genuinely pain-free, or a clinician has cleared you. Clear it?')) return;
           resolvePainConcern(S, c.id, todayISO(), 'cleared by user in app');
           entry.decision = decideForEx(ex, sess.checkin);
-          entry.sets = [];
-          const p2 = entry.decision.prescription;
-          for (let k = 0; k < (p2 ? p2.sets : ex.sets); k++) {
-            entry.sets.push(newSet(p2 ? { weight: p2.load, reps: p2.repsHigh } : { weight: null, reps: ex.hi }));
-          }
+          delete entry.progressionChoice;
+          seedSets(entry, ex, entry.decision);
           persist(); renderTrain(); toast('Concern cleared');
         }
       };
@@ -646,6 +654,9 @@ function exCard(sess, entry, idx) {
     <div class="target"><span class="k">Target</span><span class="v">${p && p.load != null ? p.load + (ex.modality==='assisted'?' asst':'') : '—'}</span></div>
     <div><span class="k">Actual</span><span class="v">${perf.length ? esc(actualSummary(perf, ex)) : '—'}</span></div>`;
   body.appendChild(pta);
+
+  // progression: current load and range, last time, today's per-set targets, what is still required
+  if (d && d.progression) body.appendChild(progressPanel(sess, entry, ex, d));
 
   // explanation
   if (d && d.explain) {
@@ -685,7 +696,9 @@ function exCard(sess, entry, idx) {
 function setRow(sess, entry, ex, set, i) {
   const row = el('div','setrow' + (set.status === 'pending' ? ' suggested' : ''));
   const unit = ex.unit || (MODALITY[ex.modality] || {}).unit || 'reps';
-  row.appendChild(el('div','sn', String(i + 1)));
+  const sn = el('div','sn' + (set.role === 'backoff' ? ' bo' : ''), set.role === 'backoff' ? 'BO' : String(i + 1));
+  if (set.role === 'backoff') sn.title = 'Back-off set: a deliberate lighter set. It does not count towards the working load.';
+  row.appendChild(sn);
 
   const wf = el('div','fld');
   wf.innerHTML = `<label for="w${entry.variantId}${i}">${ex.modality === 'assisted' ? 'asst' : 'kg'}</label>`;
@@ -753,6 +766,218 @@ function actualSummary(sets, ex) {
   const reps = sets.filter(s => s.actualWeight === w).map(s => s.actualReps).join(',');
   return `${w ?? 0}×${reps || '—'}`;
 }
+function decisionLabel(d) {
+  const st = d && d.progression && d.progression.status;
+  if (st === 'building') return 'Build';
+  if (st === 'blocked') return 'Hold';
+  if (st === 'manual') return 'Manual';
+  return actionLabel(d.action);
+}
+function decisionKind(d) {
+  const st = d && d.progression && d.progression.status;
+  if (st === 'building') return 'go';
+  return pillKind(d.action);
+}
+
+/* ------------------------------------------------ progression panel ---- */
+function progressPanel(sess, entry, ex, d) {
+  const info = d.progression;
+  const box = el('div', 'prog');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'Progression for ' + ex.name);
+  const performed = workingSets(entry).length > 0;
+  let h = `<div class="p-head">${esc(info.header)}</div>`;
+  h += `<div class="p-line">${esc(info.lastText || '')}</div>`;
+  if (info.todayText) h += `<div class="p-line"><b>${esc(info.todayText)}</b></div>`;
+  if (info.method === 'double' && info.setsAtTop && info.status !== 'paused') {
+    const { have, need } = info.setsAtTop;
+    let dots = '';
+    for (let i = 0; i < need; i++) dots += `<i class="${i < have ? 'on' : ''}"></i>`;
+    h += `<div class="meter" role="img" aria-label="${have} of ${need} sets reached ${info.repMax} last time">${dots}</div>
+          <div class="meter-l">Last session: ${have} of ${need} sets at ${info.repMax}` +
+         (info.qualifying.need > 1 ? ` · qualifying sessions ${info.qualifying.have} of ${info.qualifying.need}` : '') + `</div>`;
+  }
+  if (info.requirements && info.requirements.length && info.status !== 'earned') {
+    h += '<ul class="req" aria-label="What is still required for the next weight increase">' +
+      info.requirements.map(r => {
+        const k = r.met === true ? 'met' : r.met === false ? 'unmet' : 'unknown';
+        const ic = r.met === true ? '✓' : r.met === false ? '✕' : '?';
+        const sr = r.met === true ? 'done' : r.met === false ? 'not yet' : 'unknown';
+        return `<li class="${k}"><span class="ic" aria-hidden="true">${ic}</span><span>${esc(r.text)} <span class="sr-only">(${sr})</span></span></li>`;
+      }).join('') + '</ul>';
+  }
+  if (info.nextText) h += `<div class="p-next">${esc(info.nextText)}</div>`;
+  box.innerHTML = h;
+
+  const ch = entry.progressionChoice;
+  if (ch) {
+    const rec = ch.recommended;
+    const what = ch.chosen === 'accepted' ? 'You accepted the recommendation.'
+      : ch.chosen === 'held' ? `You held the load at ${ch.applied.load != null ? ch.applied.load + ' kg' : 'its previous value'}.`
+      : `You edited today's numbers: ${ch.applied.load} kg, ${ch.applied.setTargets.join(' / ')}.`;
+    box.appendChild(el('div', 'choice',
+      `${esc(what)} The app recommended ${rec.load != null ? esc(rec.load) + ' kg' : 'no load'}${rec.setTargets && rec.setTargets.length ? ' · ' + esc(rec.setTargets.join(' / ')) : ''}. ` +
+      `Your choice is recorded separately.`));
+  }
+  if (!d.paused && !performed) {
+    const bar = el('div', 'mediabar');
+    if (info.status === 'earned' && !ch) {
+      const prev = info.lastLoad;
+      box.appendChild(el('div', 'p-prev',
+        `<div class="t">Weight increase earned: ${esc(info.header)}</div>
+         <div class="muted" style="font-size:.84rem;margin-top:2px">Accept it, hold at ${prev != null ? esc(prev) + ' kg' : 'the previous load'}, or enter your own numbers.</div>`));
+      const acc = el('button', 'btn sm primary', 'Accept');
+      acc.onclick = () => chooseProgression(entry, ex, 'accept');
+      const hold = el('button', 'btn sm', 'Hold' + (prev != null ? ' at ' + prev + ' kg' : ''));
+      hold.onclick = () => chooseProgression(entry, ex, 'hold');
+      bar.append(acc, hold);
+    }
+    const edit = el('button', 'btn sm ghost', 'Edit');
+    edit.onclick = () => openProgressionEdit(entry, ex);
+    bar.appendChild(edit);
+    box.appendChild(bar);
+  }
+  return box;
+}
+function chooseProgression(entry, ex, choice) {
+  const settings = resolveSettings(S, ex);
+  const before = JSON.parse(JSON.stringify({ sets: entry.sets, choice: entry.progressionChoice || null }));
+  const r = applyProgressionChoice(entry, choice, null, settings);
+  if (!r.ok) { toast(r.problems[0], 'warn'); return; }
+  pushUndo('progression ' + choice, () => {
+    entry.sets = before.sets;
+    if (before.choice) entry.progressionChoice = before.choice; else delete entry.progressionChoice;
+  });
+  persist(); renderTrain();
+  say(choice === 'accept' ? 'Recommendation accepted' : 'Held at the previous load');
+  toast(choice === 'accept' ? 'Accepted' : 'Held at the previous load', null, true);
+}
+let pgCtx = null;
+function openProgressionEdit(entry, ex) {
+  const d = entry.decision, p = d && d.prescription;
+  if (!p) { toast('Nothing to edit yet. Log the first sets to set a baseline.', 'warn'); return; }
+  const top = entry.sets.filter(x => !x.warmup && x.role !== 'backoff');
+  pgCtx = { entry, ex };
+  const cur = top[0] || {};
+  const b = $('#pgBody'); b.innerHTML = '';
+  const unit = ex.modality === 'assisted' ? 'Assistance (kg)' : 'Load (kg)';
+  b.innerHTML = `
+    <div class="fld2"><label for="pgLoad">${esc(unit)}</label>
+      <input id="pgLoad" type="number" step="0.25" inputmode="decimal" value="${cur.plannedWeight != null ? esc(cur.plannedWeight) : ''}"></div>
+    <div class="fld2"><label for="pgReps">Target per set, in order</label>
+      <input id="pgReps" type="text" inputmode="numeric" value="${esc(top.map(x => x.plannedReps).join(', '))}" placeholder="e.g. 9, 9, 8">
+      <div class="hint">One number for each set. Adding a set while raising the load is not allowed: change one, then the other next time.</div></div>
+    <div class="hint">The app recommended <b>${p.load != null ? esc(p.load) + ' kg' : 'no load'}</b>${p.setTargets ? ' · ' + esc(p.setTargets.join(' / ')) : ''}.</div>`;
+  $('#pgErr').innerHTML = '';
+  openSheet('pgSheet');
+}
+$('#pgSave').onclick = () => {
+  if (!pgCtx) return;
+  const { entry, ex } = pgCtx;
+  const load = parseFloat($('#pgLoad').value);
+  const targets = $('#pgReps').value.split(/[\s,;\/]+/).filter(Boolean).map(Number);
+  const settings = resolveSettings(S, ex);
+  const before = JSON.parse(JSON.stringify({ sets: entry.sets, choice: entry.progressionChoice || null }));
+  const r = applyProgressionChoice(entry, 'edit', { load, setTargets: targets }, settings);
+  const box = $('#pgErr');
+  if (!r.ok) {
+    box.innerHTML = `<div class="ps-errs"><b>Not saved</b><ul>${r.problems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    return;
+  }
+  pushUndo('progression edit', () => {
+    entry.sets = before.sets;
+    if (before.choice) entry.progressionChoice = before.choice; else delete entry.progressionChoice;
+  });
+  persist(); closeSheet('pgSheet'); renderTrain();
+  toast(r.warnings.length ? 'Saved as your change. ' + r.warnings[0] : 'Saved as your change', r.warnings.length ? 'warn' : null, true);
+};
+
+/* ------------------------------------------- per-exercise settings ----- */
+let psCtx = null;
+function openProgressionSettings(ex) {
+  const s = resolveSettings(S, ex);
+  psCtx = { ex };
+  const unit = (MODALITY[ex.modality] || {}).unit || 'reps';
+  const unitWord = unit === 's' ? 'seconds' : unit === 'm' ? 'metres' : 'reps';
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${String(v) === String(cur) ? ' selected' : ''}>${esc(l)}</option>`;
+  const b = $('#psBody');
+  b.innerHTML = `
+    <div class="fld2"><label for="psMethod">Progression method</label>
+      <select id="psMethod">${Object.keys(PROGRESSION_METHODS).map(k => opt(k, PROGRESSION_METHODS[k].label, s.method)).join('')}</select>
+      <div class="hint" id="psMethodHint"></div></div>
+    <div class="row2">
+      <div class="fld2"><label for="psSets">Working sets</label><input id="psSets" type="number" min="1" max="10" step="1" value="${esc(s.sets)}"></div>
+      <div class="fld2"><label for="psStep">Step per session (${esc(unitWord)})</label><input id="psStep" type="number" min="1" step="1" value="${esc(s.repStep)}"></div>
+    </div>
+    <div class="row2">
+      <div class="fld2"><label for="psMin">Minimum ${esc(unitWord)}</label><input id="psMin" type="number" min="1" step="1" value="${esc(s.repMin)}"></div>
+      <div class="fld2"><label for="psMax">Maximum ${esc(unitWord)}</label><input id="psMax" type="number" min="1" step="1" value="${esc(s.repMax)}"></div>
+    </div>
+    <div class="fld2"><label for="psInc">${ex.modality === 'assisted' ? 'Available assistance steps (kg)' : 'Available weight increases (kg)'}</label>
+      <input id="psInc" type="text" inputmode="decimal" value="${esc(s.increments.join(', '))}">
+      <div class="hint">What your equipment actually allows, comma separated, for example 1.25, 2.5, 5. The app only ever uses these and picks the smallest one that fits the limit.</div></div>
+    <div class="fld2"><label for="psJump">Progression limit (% of the load per step)</label>
+      <input id="psJump" type="number" min="0.5" max="25" step="0.5" value="${esc(s.maxJumpPct)}">
+      <div class="hint">If the smallest increase is bigger than this, the load holds and the app tells you why.</div></div>
+    <div class="row2">
+      <div class="fld2"><label for="psRir">Clean reps in reserve needed</label>
+        <select id="psRir">${[0,1,2,3,4].map(n => opt(n, n + (n === 4 ? '+' : ''), s.minReserve)).join('')}</select></div>
+      <div class="fld2"><label for="psEff">Highest acceptable effort</label>
+        <select id="psEff">${Object.keys(EFFORT_SCALE).map(k => opt(k, EFFORT_SCALE[k].label, s.maxEffort)).join('')}</select></div>
+    </div>
+    <div class="fld2"><label for="psQual">Qualifying sessions in a row before the load goes up</label>
+      <select id="psQual">${[1,2,3,4,5].map(n => opt(n, n === 1 ? '1 (the next session)' : n + ' in a row', s.qualifyingSessions)).join('')}</select></div>
+    <div class="row2">
+      <div class="fld2"><label for="psBoSets">Back-off sets (0 for none)</label>
+        <input id="psBoSets" type="number" min="0" max="4" step="1" value="${s.backoff ? esc(s.backoff.sets) : 0}"></div>
+      <div class="fld2"><label for="psBoPct">Back-off load (% of top)</label>
+        <input id="psBoPct" type="number" min="50" max="95" step="1" value="${s.backoff ? esc(s.backoff.pct) : 85}"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="psTech"${s.requireTechnique ? ' checked' : ''}><span>Require technique feedback before the load can go up</span></label>
+    <label class="chk"><input type="checkbox" id="psCap"${s.addLoadAtCap ? ' checked' : ''}><span>After the top of the range, add load automatically (reps, duration and distance methods)</span></label>
+    <label class="chk"><input type="checkbox" id="psStrict"${s.strictLimit ? ' checked' : ''}><span>Never exceed the progression limit, even for a carry with a fixed distance</span></label>`;
+  const hints = {
+    double: 'Hold the load and build reps set by set. When every working set reaches the top of the range with acceptable effort and technique, add one available increment and reset the reps.',
+    reps: 'Build reps. Bodyweight work: load is added after the top of the range only if the switch below is on.',
+    duration: 'Build seconds. Load is added after the top of the range only if the switch below is on.',
+    distance: 'Build distance, or move the load when the distance is fixed.',
+    manual: 'The app never changes the load. It shows what you did and you decide.'
+  };
+  const upd = () => { $('#psMethodHint').textContent = hints[$('#psMethod').value] || ''; };
+  $('#psMethod').onchange = upd; upd();
+  $('#psTitle').textContent = ex.short + ' · progression';
+  $('#psErr').innerHTML = '';
+  openSheet('psSheet');
+}
+$('#psSave').onclick = () => {
+  if (!psCtx) return;
+  const { ex } = psCtx;
+  const bo = parseInt($('#psBoSets').value, 10);
+  const raw = {
+    method: $('#psMethod').value, sets: $('#psSets').value, repStep: $('#psStep').value,
+    repMin: $('#psMin').value, repMax: $('#psMax').value, increments: $('#psInc').value,
+    maxJumpPct: $('#psJump').value, minReserve: $('#psRir').value, maxEffort: $('#psEff').value,
+    qualifyingSessions: $('#psQual').value,
+    backoff: bo > 0 ? { sets: bo, pct: $('#psBoPct').value } : null,
+    requireTechnique: $('#psTech').checked, addLoadAtCap: $('#psCap').checked, strictLimit: $('#psStrict').checked
+  };
+  const r = saveExerciseSettings(S, ex, raw, todayISO());
+  if (!r.ok) {
+    $('#psErr').innerHTML = `<div class="ps-errs"><b>Not saved</b><ul>${r.problems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    return;
+  }
+  persist(); closeSheet('psSheet');
+  toast(r.restartedQualifying ? 'Saved. Qualifying sessions restart from today.' : 'Saved');
+  openDetail(ex); renderAll();
+};
+$('#psReset').onclick = () => {
+  if (!psCtx) return;
+  if (!confirm('Reset this exercise to the default progression settings? Logged sessions are not changed.')) return;
+  resetExerciseSettings(S, psCtx.ex);
+  persist(); closeSheet('psSheet'); toast('Reset to defaults');
+  openDetail(psCtx.ex); renderAll();
+};
+
 function pillKind(a) {
   if (a === 'progress') return 'go';
   if (a === 'reduce' || a === 'review') return 'down';
@@ -775,11 +1000,8 @@ function swapExercise(sess, entry, ex) {
   entry.substitutedFrom = entry.variantId;
   entry.variantId = nx.id; entry.exerciseId = nx.id;
   entry.decision = decideForEx(nx, sess.checkin);
-  entry.sets = [];
-  const p = entry.decision.prescription;
-  for (let k = 0; k < (p ? p.sets : nx.sets); k++) {
-    entry.sets.push(newSet(p ? { weight: p.load, reps: p.repsHigh } : { weight: null, reps: nx.hi }));
-  }
+  delete entry.progressionChoice;
+  seedSets(entry, nx, entry.decision);
   pushUndo('swap', () => Object.assign(entry, before));
   persist(); renderTrain();
   toast(`Swapped to ${nx.short}`, null, true);
@@ -1201,9 +1423,16 @@ function openDetail(ex) {
     <h4>Common mistakes</h4><ul>${ex.mistakes.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
     <h4>If you cannot do this one</h4><ul>${ex.alternatives.map(a =>
       `<li>${esc((EX_INDEX[a]||{}).name || a)}</li>`).join('')}</ul>
+    <h4>Progression</h4><ul>
+      <li><b>${esc(PROGRESSION_METHODS[d.progression.method].label)}</b> · ${esc(d.progression.sets)} × ${esc(d.progression.repMin)}–${esc(d.progression.repMax)}${resolveSettings(S, ex).source === 'custom' ? ' · customised' : ''}</li>
+      ${d.progression.nextText ? `<li>${esc(d.progression.nextText)}</li>` : ''}</ul>
     ${ex.progressionNote ? `<h4>How it progresses</h4><ul><li>${esc(ex.progressionNote)}</li></ul>` : ''}
     ${ex.prerequisite ? `<h4>Before this</h4><ul><li>${esc((EX_INDEX[ex.prerequisite]||{}).name)}</li></ul>` : ''}`;
   b.appendChild(g);
+  const setBtn = el('button', 'btn block', 'Progression settings for this exercise');
+  setBtn.style.marginTop = '12px';
+  setBtn.onclick = () => { closeSheet('detailSheet'); openProgressionSettings(ex); };
+  b.appendChild(setBtn);
   openSheet('detailSheet');
 }
 function openStretch(s) {
@@ -1692,6 +1921,7 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
 window.__recomp = {
   get S() { return S; }, set S(v) { S = v; },
   go, renderAll, startTimer, decideForEx, persist,
+  seedSets, openProgressionSettings, openProgressionEdit, chooseProgression, openDetail,
   EXERCISES, EX_INDEX, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
   makeBackup, validateBackup, migrate, LEGACY_ID_MAP,
   currentProgram, rosterFor, startSession, finishSession, nextDay,

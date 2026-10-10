@@ -68,9 +68,21 @@ t('mixed loads: working weight is the modal set, not the top single', () => {
   eq(sum.topWeight, 100, 'top weight still recorded');
   ok(sum.mixedLoads, 'mixed loads flagged');
   const d = decideFor(s, 'bench-barbell');
+  // v5: the load is built off 60, never off the 100 single. Only 3 of the 4 prescribed
+  // sets were finished at 60, so the increase is not earned yet: it holds and builds reps.
+  eq(d.action, 'hold');
+  eq(d.prescription.load, 60, 'next load builds off 60, not 100');
+  ok(d.flags.includes('building_reps'));
+});
+
+t('four finished sets at 60 plus an extra heavy single still progress from 60', () => {
+  const s = freshState();
+  logSession(s, 'bench-barbell', [
+    { w: 60, r: 8 }, { w: 60, r: 8 }, { w: 60, r: 8 }, { w: 60, r: 8 }, { w: 100, r: 1 }
+  ], { feedback: fb('manageable', '2', 'controlled', 'another_set') });
+  const d = decideFor(s, 'bench-barbell');
   eq(d.action, 'progress');
-  ok(d.prescription.load > 60 && d.prescription.load <= 65,
-     'next load builds off 60, not 100 — got ' + d.prescription.load);
+  ok(d.prescription.load > 60 && d.prescription.load <= 65, 'builds off 60, got ' + d.prescription.load);
 });
 
 t('tie between two loads resolves to the lower (conservative)', () => {
@@ -360,7 +372,7 @@ const V1 = {
 t('v1 is detected and migrated', () => {
   eq(C.detectVersion(V1), 1);
   const r = C.migrate(V1, { dayOfExercise: X.dayOfExerciseMap(), exIndex: EXI, variantMap: X.LEGACY_ID_MAP });
-  ok(r.migrated); eq(r.state.schemaVersion, 3);
+  ok(r.migrated); eq(r.state.schemaVersion, C.SCHEMA_VERSION); eq(C.SCHEMA_VERSION, 4);
 });
 
 t('week-keyed logs become dated sessions', () => {
@@ -409,8 +421,9 @@ t('settings carry into profile and nutrition', () => {
 
 t('an audit trail is written', () => {
   const r = C.migrate(V1, { dayOfExercise: X.dayOfExerciseMap(), exIndex: EXI, variantMap: X.LEGACY_ID_MAP });
-  eq(r.state.migrations.length, 1);
+  eq(r.state.migrations.length, 2);                 // v1 -> v3, then v3 -> v4
   eq(r.state.migrations[0].from, 1);
+  eq(r.state.migrations[1].from, 3);
 });
 
 t('migrating twice is not destructive (v3 passes through unchanged)', () => {
@@ -631,7 +644,19 @@ t('low readiness holds a session that would otherwise progress', () => {
   ok(d.flags.includes('low_readiness'));
 });
 
-t('three consecutive holds trigger a substitution suggestion', () => {
+t('a real plateau (four comparable sessions, no improvement, feedback recorded) suggests a substitution', () => {
+  const s = freshState();
+  for (let i = 0; i < 4; i++) {
+    logSession(s, 'bench-barbell', [{ w: 80, r: 8 }, { w: 80, r: 8 }, { w: 80, r: 8 }, { w: 80, r: 8 }],
+      { date: C.addDays('2026-09-01', i * 7),
+        feedback: fb('near_limit', '1', 'controlled'), decision: { action: 'hold' } });
+  }
+  const d = decideFor(s, 'bench-barbell', null, '2026-09-30');
+  eq(d.action, 'substitute');
+  ok(d.alternatives && d.alternatives.length, 'alternatives offered');
+});
+
+t('three holds at the same load is NOT a plateau any more', () => {
   const s = freshState();
   for (let i = 0; i < 3; i++) {
     logSession(s, 'bench-barbell', [{ w: 80, r: 8 }, { w: 80, r: 8 }, { w: 80, r: 8 }, { w: 80, r: 8 }],
@@ -639,8 +664,7 @@ t('three consecutive holds trigger a substitution suggestion', () => {
         feedback: fb('near_limit', '1', 'controlled'), decision: { action: 'hold' } });
   }
   const d = decideFor(s, 'bench-barbell', null, '2026-09-22');
-  eq(d.action, 'substitute');
-  ok(d.alternatives && d.alternatives.length, 'alternatives offered');
+  ok(d.action !== 'substitute', 'got ' + d.action);
 });
 
 t('deload is proposed, never applied automatically', () => {

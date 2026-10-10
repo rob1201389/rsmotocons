@@ -81,10 +81,10 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
   const A = () => w.__recomp;
 
   t('app boots with no script errors', () => { ok(A(), 'app namespace missing'); eq(errs, []); });
-  t('v1 localStorage data is found and migrated to v3', () => {
-    eq(A().S.schemaVersion, 3);
+  t('v1 localStorage data is found and migrated to v4', () => {
+    eq(A().S.schemaVersion, 4);
     eq(A().S.sessions.length, 2, 'two dated sessions rebuilt');
-    ok(A().S.migrations.length === 1);
+    ok(A().S.migrations.length === 2, 'v1->v3 then v3->v4');
   });
   t('migration banner is shown to the user', () => {
     ok(d.querySelector('#todayNotices .banner.ok'), 'no upgrade banner');

@@ -1,10 +1,64 @@
+# Double progression test results (v7)
+
+Run everything, from the repo:
+
+```
+cd gym/test && npm install && ./run-all.sh
+```
+
+The script copies the app files beside the suites in a temporary directory, so nothing in the repo is modified.
+
+| Suite | Result | Covers |
+|---|---|---|
+| `docs/tests.js` | 75 passed, 0 failed | Original logic suite (two tests rewritten, see below) |
+| `docs/regression.js` | 39 passed, 0 failed | Defects from the earlier independent review, unchanged |
+| `docs/uitest.js` | 58 passed, 0 failed | Original UI suite (one assertion moved from schema v3 to v4) |
+| `test/doubleprog.test.js` | 93 passed, 0 failed | Double progression engine, end to end |
+| `test/doubleprog.ui.test.js` | 23 passed, 0 failed | The workout panel, preview and settings, in jsdom |
+| **Total** | **288 passed, 0 failed** | |
+
+Each scenario in `doubleprog.test.js` prescribes a session with the engine, creates the sets the app would create, logs actual numbers over them and reads the next decision back.
+
+| Group | Covers |
+|---|---|
+| Settings | Per-variant storage, defaults from definition and profile, per-equipment increments, separate histories, validation, what restarts qualifying |
+| Building reps | Partial progress, one step per set, no maximum on every set, load fixed while building, a short set holds everything back |
+| Earned increase | All sets at the top, one available increment, reps reset to the minimum, sets never change in the same step, a full 8 to 12 cycle, judged at the prescribed load, qualifying sessions required in a row |
+| Warm-ups, skipped, incomplete | None count; extra sets do not hide a missing top set |
+| Mixed loads and back-off | Heavy opener, lighter sets, assisted machines (more assistance is not at the load), deliberate back-off created as its own role, back-off never qualifies or sets the load |
+| Feedback and recovery | Maximum effort, zero or low reserve, effort above the exercise limit, configurable reserve, deteriorating technique, "needed less", mild and concerning pain, open concern persists |
+| Missing feedback | Shown as unknown, never as met; technique alone is not enough; mandatory technique setting |
+| Increments and limit | Over-limit increment holds and explains, no invented weights, smaller available increment used, raising the limit unlocks the larger one |
+| Deload and break | Deload overrides an earned increase, return to the pre-deload load, deload is not plateau evidence, long break trims and never progresses, low readiness holds only today |
+| Reps are progress | Rep gains over four and six sessions are not a plateau; flat performance with feedback over enough time is; flat with no feedback is unknown; too short a span or too few sessions is not; added weight counts |
+| Other types | Assisted, bodyweight reps (including reps only), timed holds, carries (and the switchable exception), manual |
+| Workout summary | Header, last time, today, requirements, proposed next load, blocked reason, mixed-load display |
+| Accept, hold, edit | Recorded separately, recommendation preserved, load plus extra set refused, over-limit jump warned, invalid edits change nothing, logged sets untouched |
+| History | Editing or un-logging a past set changes the next recommendation but no recorded prescription; changing settings never alters completed sessions |
+| Migration | v3 to v4 byte-identical sessions, same behaviour after, increments carried, v1 to v4 in one pass, backup round trip, sets without a role |
+
+## Older tests that changed, and why
+
+1. **Mixed loads** used to expect progress when three of four sets were done at 60 kg and the fourth was a 100 kg single. The new standard needs every prescribed set. It now expects a hold at 60 kg (never built off 100), and a new test shows four finished sets plus an extra heavy single still progress from 60.
+2. **Three holds in a row suggests a swap** is replaced by a four-session comparable-performance test, plus a test that three holds is not a plateau.
+3. **Migration version and audit trail** now expect schema 4 and two audit entries (v1 to v3, then v3 to v4).
+
+## Not tested
+
+- Real devices. The panel was checked in a phone-sized headless Chromium and jsdom, not on an iPhone.
+- Screen readers. The checklist has text equivalents for done, not yet and unknown, but no screen reader has been run against it.
+- Long histories (hundreds of sessions). Plateau and qualifying lookups scan the variant's history on every decision.
+- Whether the thresholds are right for you. They are judgement calls, listed under Profile, Coaching assumptions.
+
+---
+
 # Test results, and an honest list of what is not tested
 
 Run them yourself:
 
 ```
-node tests.js     # 73 logic tests
-node uitest.js    # 49 UI integration tests in a simulated browser (needs jsdom)
+node tests.js     # logic tests
+node uitest.js    # UI integration tests in a simulated browser (needs jsdom)
 ```
 
 ## What passes

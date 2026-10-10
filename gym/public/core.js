@@ -1,10 +1,10 @@
 /* ============================================================================
-   Recomp core — schema v3, migration, sessions, records, nutrition, backup.
+   Recomp core — schema v4, migration, sessions, records, nutrition, backup.
    Pure logic, no DOM. Loaded as a classic script in the browser and required
    by the node test suite.
    ========================================================================== */
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /* ---------------------------------------------------------------- defaults */
 const DEFAULT_INCREMENTS = {
@@ -61,6 +61,7 @@ function blankState() {
     nutrition: { ...DEFAULT_NUTRITION },
     prefs: { ...DEFAULT_PREFS },
     program: { startDate: todayISO(), weeks: 13 },
+    exerciseSettings: {},  // per VARIANT progression settings (v4). Absent = defaults.
     sessions: [],          // stable-id, dated session records
     bodyweight: [],        // [{date:'YYYY-MM-DD', kg}]
     bests: {},             // derived; always recomputed, never incremented in place
@@ -133,6 +134,7 @@ function newSet(planned) {
     actualReps: null,
     status: 'pending',             // pending | confirmed | edited | skipped
     warmup: false,
+    role: (planned && planned.role) || 'working',   // working | backoff (a deliberate lighter set)
     ts: null
   };
 }
@@ -141,6 +143,13 @@ const PERFORMED = new Set(['confirmed', 'edited']);
 function isPerformed(s) { return PERFORMED.has(s.status); }
 function workingSets(entry) {
   return (entry.sets || []).filter(s => isPerformed(s) && !s.warmup);
+}
+/* Back-off sets are a deliberate lighter prescription. They count as volume but
+   never as evidence that the TOP load was completed. Older sets have no role
+   and are working sets. */
+function isBackoff(s) { return !!s && s.role === 'backoff'; }
+function topSets(entry) {
+  return (entry.sets || []).filter(s => isPerformed(s) && !s.warmup && !isBackoff(s));
 }
 
 /* Confirming a set copies the plan into actuals ONLY on explicit action. */
@@ -184,13 +193,15 @@ function modeWeight(sets) {
 
 /* Summarise one performed entry into the facts the engine reasons about. */
 function summariseEntry(entry, ex) {
-  const sets = workingSets(entry);
+  const sets = topSets(entry);                 // back-off and warm-up sets never set the working load
+  const allWork = workingSets(entry);          // volume still counts every performed working set
   const ww = modeWeight(sets);
   const atWorking = sets.filter(s => s.actualWeight === ww);
   const reps = sets.map(s => s.actualReps).filter(r => r != null);
-  const plannedReps = (entry.sets || []).map(s => s.plannedReps).filter(r => r != null);
+  const planned = (entry.sets || []).filter(s => !s.warmup && !isBackoff(s));
+  const plannedReps = planned.map(s => s.plannedReps).filter(r => r != null);
   const targetReps = plannedReps.length ? Math.max(...plannedReps) : (ex ? ex.hi : null);
-  const targetSets = (entry.sets || []).length || (ex ? ex.sets : 0);
+  const targetSets = planned.length || (ex ? ex.sets : 0);
   return {
     performedSets: sets.length,
     targetSets,
@@ -201,7 +212,7 @@ function summariseEntry(entry, ex) {
     maxReps: reps.length ? Math.max(...reps) : null,
     topWeight: sets.length ? Math.max(...sets.map(s => s.actualWeight || 0)) : null,
     targetReps,
-    volume: sets.reduce((a, s) => a + (s.actualWeight || 0) * (s.actualReps || 0), 0),
+    volume: allWork.reduce((a, s) => a + (s.actualWeight || 0) * (s.actualReps || 0), 0),
     mixedLoads: new Set(sets.map(s => s.actualWeight)).size > 1
   };
 }
@@ -219,7 +230,7 @@ function historyFor(state, variantId) {
   completedSessions(state).forEach(sess => {
     sess.entries.forEach(e => {
       if (e.variantId !== variantId || e.skipped) return;
-      if (!workingSets(e).length) return;
+      if (!topSets(e).length) return;
       out.push({ session: sess, entry: e });
     });
   });
@@ -516,18 +527,47 @@ function migrateV1toV3(old, dayOfExercise, exIndex, variantMap) {
   recomputeBests(s, exIndex);     // discard v1's monotonic bests entirely
   s.lastBackup = old.lastBackup || null;
   s.lastBackupVerified = false;
-  s.migrations.push({ from: 1, to: SCHEMA_VERSION, at: Date.now(),
+  s.migrations.push({ from: 1, to: 3, at: Date.now(),
                       sessions: s.sessions.length,
                       note: 'week-keyed logs split into dated sessions; legacy exercise ids mapped to variants; records recomputed' });
   return s;
+}
+
+
+/* v3 -> v4. Purely additive: nothing is rewritten, renamed or dropped.
+     - exerciseSettings is created empty. An exercise with no stored settings
+       resolves to defaults built from what v3 already knew: its sets and rep
+       range from the exercise definition, the per-equipment increments and the
+       maximum load jump from the profile. So every existing exercise behaves as
+       it did, and the user can then customise it per variant.
+     - Sessions, entries, sets, decisions, feedback, pain concerns and records
+       are carried over untouched. Sets without a role are working sets.
+   The audit entry records the counts so a loss would be visible.            */
+function migrateV3toV4(raw) {
+  const st = Object.assign(blankState(), raw, { schemaVersion: 4 });
+  st.profile = Object.assign({}, DEFAULT_PROFILE, raw.profile || {});
+  st.profile.increments = Object.assign({}, DEFAULT_INCREMENTS, (raw.profile || {}).increments || {});
+  st.nutrition = Object.assign({}, DEFAULT_NUTRITION, raw.nutrition || {});
+  st.prefs = Object.assign({}, DEFAULT_PREFS, raw.prefs || {});
+  st.exerciseSettings = Object.assign({}, raw.exerciseSettings || {});
+  const sets = (st.sessions || []).reduce((a, x) =>
+    a + (x.entries || []).reduce((b, e) => b + (e.sets || []).length, 0), 0);
+  st.migrations = (st.migrations || []).concat([{
+    from: 3, to: 4, at: Date.now(),
+    sessions: (st.sessions || []).length, sets,
+    note: 'per-exercise progression settings added (empty, defaults apply); sessions and sets unchanged'
+  }]);
+  return st;
 }
 
 function migrate(raw, opts) {
   opts = opts || {};
   const v = detectVersion(raw);
   if (v == null) return { state: blankState(), migrated: false, from: null };
+  if (v === 3) return { state: migrateV3toV4(raw), migrated: true, from: 3 };
   if (v === SCHEMA_VERSION) {
     const st = Object.assign(blankState(), raw);
+    st.exerciseSettings = Object.assign({}, raw.exerciseSettings || {});
     st.profile = Object.assign({}, DEFAULT_PROFILE, raw.profile || {});
     st.profile.increments = Object.assign({}, DEFAULT_INCREMENTS, (raw.profile || {}).increments || {});
     st.nutrition = Object.assign({}, DEFAULT_NUTRITION, raw.nutrition || {});
@@ -535,12 +575,12 @@ function migrate(raw, opts) {
     return { state: st, migrated: false, from: v };
   }
   if (v === 1) {
-    return { state: migrateV1toV3(raw, opts.dayOfExercise, opts.exIndex, opts.variantMap), migrated: true, from: 1 };
+    return { state: migrateV3toV4(migrateV1toV3(raw, opts.dayOfExercise, opts.exIndex, opts.variantMap)), migrated: true, from: 1 };
   }
   if (v === 2) { // reserved: v2 never shipped publicly
-    const st = Object.assign(blankState(), raw, { schemaVersion: SCHEMA_VERSION });
-    st.migrations = (st.migrations || []).concat([{ from: 2, to: SCHEMA_VERSION, at: Date.now() }]);
-    return { state: st, migrated: true, from: 2 };
+    const st = Object.assign(blankState(), raw, { schemaVersion: 3 });
+    st.migrations = (st.migrations || []).concat([{ from: 2, to: 3, at: Date.now() }]);
+    return { state: migrateV3toV4(st), migrated: true, from: 2 };
   }
   // Unknown FUTURE version: refuse rather than mangle it.
   return { state: null, migrated: false, from: v,
@@ -609,12 +649,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SCHEMA_VERSION, DEFAULT_PROFILE, DEFAULT_NUTRITION, DEFAULT_PREFS, DEFAULT_INCREMENTS,
     blankState, newId, todayISO, isoOf, parseISO, daysBetween, addDays,
-    newSession, newEntry, newSet, confirmSet, editSet, unlogSet, isPerformed, workingSets,
+    newSession, newEntry, newSet, confirmSet, editSet, unlogSet, isPerformed, workingSets, topSets, isBackoff,
     modeWeight, summariseEntry, completedSessions, historyFor, lastPerformance,
     e1rm, recomputeBests,
     logBodyweight, trailingAverage, weeklyRate, currentBodyweight,
     macroTargets, buildMealPlan, planTotals, FOOD,
-    detectVersion, migrate, migrateV1toV3,
+    detectVersion, migrate, migrateV1toV3, migrateV3toV4,
     makeBackup, validateBackup, checksum
   };
 }
