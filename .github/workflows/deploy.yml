@@ -15,6 +15,11 @@ on:
       - "**/*.md"
       - "setup/**"
   workflow_dispatch:
+    inputs:
+      reset_gym_owner:
+        description: "Delete the gym owner account so it is recreated from the repo secrets (only if it is the only account)"
+        type: boolean
+        default: false
 
 # Never let two deploys race. A queued one waits rather than overtaking.
 concurrency:
@@ -61,6 +66,20 @@ jobs:
       - name: Gym app database tables
         working-directory: gym
         run: npx --yes wrangler@4 d1 execute DB --remote --file=backend/schema.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Off by default. Ticked by hand on "Run workflow" when the owner password
+      # is lost before anyone has used the app. Refuses if there is more than
+      # one account. The next deploy secrets below then recreate the owner.
+      - name: Gym app owner reset
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_gym_owner }}
+        working-directory: gym
+        run: >
+          npx --yes wrangler@4 d1 execute DB --remote --command
+          "DELETE FROM users WHERE role = 'owner' AND (SELECT COUNT(*) FROM users) = 1;
+          DELETE FROM meta WHERE key = 'bootstrap_done' AND (SELECT COUNT(*) FROM users) = 0;"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
