@@ -72,7 +72,7 @@ jobs:
 
       # Off by default. Ticked by hand on "Run workflow" when the owner password
       # is lost before anyone has used the app. Refuses if there is more than
-      # one account. The next deploy secrets below then recreate the owner.
+      # one account. The owner then sets a new password in the app.
       - name: Gym app owner reset
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_gym_owner }}
         working-directory: gym
@@ -84,19 +84,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # The owner is created from these on the first sign-in page load, then
-      # the bootstrap disables itself. Skipped until both repo secrets exist.
-      - name: Gym app owner secrets
+      # The owner chooses their own password in the app the first time; only
+      # their email is configured here. Skipped until GYM_OWNER_EMAIL exists.
+      - name: Gym app owner email
         working-directory: gym
         run: |
-          if [ -z "$GYM_OWNER_EMAIL" ] || [ -z "$GYM_OWNER_PASSWORD" ]; then
-            echo "GYM_OWNER_EMAIL / GYM_OWNER_PASSWORD not set; skipping."; exit 0
+          if [ -z "$GYM_OWNER_EMAIL" ]; then
+            echo "GYM_OWNER_EMAIL not set; skipping."; exit 0
           fi
           printf '%s' "$GYM_OWNER_EMAIL" | npx --yes wrangler@4 secret put OWNER_EMAIL
-          printf '%s' "$GYM_OWNER_PASSWORD" | npx --yes wrangler@4 secret put BOOTSTRAP_OWNER_PASSWORD
         env:
           GYM_OWNER_EMAIL: ${{ secrets.GYM_OWNER_EMAIL }}
-          GYM_OWNER_PASSWORD: ${{ secrets.GYM_OWNER_PASSWORD }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 

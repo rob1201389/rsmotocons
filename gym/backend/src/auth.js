@@ -112,6 +112,48 @@ export async function bootstrapOwner(db, env, now) {
   return { ok: true, id, email, mustChangePassword: true };
 }
 
+/* ---------------------------------------------------------------- first-run setup
+   While no owner exists, the person whose email matches OWNER_EMAIL may choose
+   their own password and become the owner. Nothing secret is stored or shipped:
+   the password is typed once, here, and only its hash is kept. The window shuts
+   permanently the moment an owner exists. */
+export async function setupAvailable(db, env) {
+  if (!(env.OWNER_EMAIL || '').trim()) return false;
+  const existing = await db.get("SELECT id FROM users WHERE role = 'owner'");
+  return !existing;
+}
+
+export async function claimOwner(db, env, email, password, ip, ua, now) {
+  const key = `setup|${ip || 'noip'}`;
+  if (await rateLimited(db, key, now)) {
+    return { ok: false, status: 429, error: 'Too many attempts. Try again in 15 minutes.' };
+  }
+  if (!(await setupAvailable(db, env))) {
+    return { ok: false, status: 409, error: 'Setup is not available. Sign in instead.' };
+  }
+  const ownerEmail = (env.OWNER_EMAIL || '').trim().toLowerCase();
+  const given = (email || '').trim().toLowerCase();
+  if (!given || given !== ownerEmail) {
+    await noteAttempt(db, key, false, now);
+    await audit(db, null, 'setup.refused_email', null, null, ip);
+    return { ok: false, status: 403, error: 'That email is not allowed to set up this app.' };
+  }
+  const problems = passwordProblems(password);
+  if (problems.length) {
+    return { ok: false, status: 400, error: `Your password needs ${problems.join(', ')}.` };
+  }
+  const id = newId('u');
+  await db.run(
+    `INSERT INTO users (id, email, name, password_hash, role, status, must_change_pw, created_at, approved_at, pw_changed_at)
+     VALUES (?,?,?,?,'owner','active',0,?,?,?)`,
+    id, ownerEmail, env.OWNER_NAME || 'Owner', await hashPassword(password), now, now, now);
+  await db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('bootstrap_done', ?)", String(now));
+  const user = await db.get('SELECT * FROM users WHERE id = ?', id);
+  await audit(db, user, 'setup.owner_created', id, { email: ownerEmail }, ip);
+  const token = await createSession(db, user, ip, ua, now);
+  return { ok: true, token, user };
+}
+
 export async function login(db, email, password, ip, ua, now) {
   const key = `${(email || '').toLowerCase()}|${ip || 'noip'}`;
   if (await rateLimited(db, key, now)) {

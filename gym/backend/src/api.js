@@ -9,7 +9,7 @@
 
 import { newId, sha256hex } from './crypto.js';
 import { sessionFromRequest, login, changePassword, revokeAllSessions, revokeSession,
-         sessionCookie, clearCookie, readCookie, audit, bootstrapOwner } from './auth.js';
+         sessionCookie, clearCookie, readCookie, audit, setupAvailable, claimOwner } from './auth.js';
 import { can, isOwner, isAdmin, isReviewer, effectivePermissions, mayAccessUserData,
          FEATURES, ROLES } from './rbac.js';
 
@@ -61,13 +61,15 @@ export async function handle(req, ctx) {
   }
   if (path === '/api/auth/session' && req.method === 'GET') {
     const { user, reason } = await sessionFromRequest(db, req, now);
-    if (!user) return json({ authenticated: false, reason: reason || 'none' }, 200);
+    if (!user) return json({ authenticated: false, reason: reason || 'none',
+      setupAvailable: await setupAvailable(db, env) }, 200);
     return json({ authenticated: true, user: publicUser(user) });
   }
-  if (path === '/api/bootstrap' && req.method === 'POST') {
-    const r = await bootstrapOwner(db, env, now);
-    if (!r.ok) return err(409, r.message || `Bootstrap unavailable (${r.reason}).`, { reason: r.reason });
-    return json({ ok: true, email: r.email, mustChangePassword: true });
+  if (path === '/api/auth/setup' && req.method === 'POST') {
+    const b = await body(req);
+    const r = await claimOwner(db, env, b.email, b.password, ip, ua, now);
+    if (!r.ok) return err(r.status, r.error);
+    return json({ user: publicUser(r.user) }, 200, { 'Set-Cookie': sessionCookie(r.token, secure) });
   }
 
   /* ---- everything below requires a live session ------------------------- */

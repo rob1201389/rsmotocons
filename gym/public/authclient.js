@@ -78,7 +78,7 @@ const AUTH = (function () {
         return { state: 'authenticated', user: r.data.user };
       }
       session = null;
-      return { state: 'anonymous', reason: r.data.reason };
+      return { state: 'anonymous', reason: r.data.reason, setupAvailable: !!r.data.setupAvailable };
     } catch (e) {
       // Network failure, not a rejection. Fall back to the bounded offline window.
       offline = true;
@@ -100,6 +100,19 @@ const AUTH = (function () {
         message: lv ? 'Offline for more than three days. Reconnect to keep using Recomp.'
                     : 'You need to be online to sign in the first time.' };
     }
+  }
+
+  async function setup(email, password) {
+    const r = await api('/api/auth/setup', { method: 'POST', body: { email, password } });
+    if (r.status !== 200) return { ok: false, error: r.data.error || 'Setup failed.' };
+    session = { user: r.data.user };
+    lastVerifiedAt = Date.now();
+    try {
+      localStorage.setItem('recomp.lastVerified', String(lastVerifiedAt));
+      localStorage.setItem('recomp.lastUser', r.data.user.id);
+      localStorage.setItem(nsKey(r.data.user.id, 'user'), JSON.stringify(r.data.user));
+    } catch (e) {}
+    return { ok: true, user: r.data.user };
   }
 
   async function login(email, password) {
@@ -170,7 +183,7 @@ const AUTH = (function () {
     return u ? nsKey(u.id, name) : `recomp.anon.${name}`;
   }
 
-  return { api, refresh, login, logout, changePassword, pullState, pushState,
+  return { api, refresh, setup, login, logout, changePassword, pullState, pushState,
            user, can, isOffline, localKey, wipeAccount, wipeAllAccounts, wipeCaches,
            OFFLINE_GRACE_MS };
 })();

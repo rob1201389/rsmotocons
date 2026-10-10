@@ -333,6 +333,25 @@ section[hidden]{display:none}
       <button class="btn primary block lg" id="loginBtn" type="submit">Sign in</button>
     </form>
 
+    <form id="setupForm" hidden autocomplete="on">
+      <div class="authfield">
+        <label for="setupEmail">Email</label>
+        <input id="setupEmail" type="email" name="email" autocomplete="username"
+               inputmode="email" autocapitalize="none" spellcheck="false" required>
+      </div>
+      <div class="authfield">
+        <label for="setupPw">Choose a password</label>
+        <input id="setupPw" type="password" name="password" autocomplete="new-password" required>
+        <span class="dim" style="font-size:.78rem">At least 12 characters, with a lowercase letter, a digit and an uppercase letter or symbol.</span>
+      </div>
+      <div class="authfield">
+        <label for="setupConfirm">Repeat password</label>
+        <input id="setupConfirm" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="autherr" id="setupError" role="alert" hidden></p>
+      <button class="btn primary block lg" id="setupBtn" type="submit">Create my account</button>
+    </form>
+
     <form id="pwForm" hidden autocomplete="on">
       <p class="banner" style="margin-bottom:12px">
         <span>Choose a new password before you continue. The one you were given is temporary.</span></p>
