@@ -110,6 +110,40 @@ sec('FIRST-RUN SETUP — the owner chooses their own password in the app');
   app2.server.close();
 }
 
+sec('PLAIN-NAME LOGIN — a login does not have to be an email');
+{
+  const app3 = await createApp({ env: { OWNER_LOGIN: 'RS Motocons', OWNER_NAME: 'RS' } });
+  await new Promise(r => app3.server.listen(0, '127.0.0.1', r));
+  const B3 = `http://127.0.0.1:${app3.server.address().port}`;
+  let ck3 = null;
+  const call3 = async (path, body) => {
+    const res = await fetch(B3 + path, { method: body ? 'POST' : 'GET',
+      headers: Object.assign({ 'Content-Type': 'application/json', 'X-Recomp-Request': '1' }, ck3 ? { Cookie: ck3 } : {}),
+      body: body ? JSON.stringify(body) : undefined });
+    const sc = res.headers.get('set-cookie'); if (sc) ck3 = sc.split(';')[0];
+    let data = null; try { data = await res.json(); } catch (e) {}
+    return { status: res.status, data };
+  };
+  const PW = 'Plain-Name-Passphrase-31';
+  await t('setup is offered when only OWNER_LOGIN is configured', async () => {
+    eq((await call3('/api/auth/session')).data.setupAvailable, true);
+  });
+  await t('a different login is refused', async () => {
+    eq((await call3('/api/auth/setup', { login: 'x', email: 'someone else', password: PW })).status, 403);
+  });
+  await t('"  rs   MOTOCONS " claims the owner login (case and spacing ignored)', async () => {
+    const r = await call3('/api/auth/setup', { email: '  rs   MOTOCONS ', password: PW });
+    eq(r.status, 200); eq(r.data.user.email, 'rs motocons'); eq(r.data.user.role, 'owner');
+  });
+  await t('signing in with the name as typed works, a wrong password does not', async () => {
+    ck3 = null;
+    eq((await call3('/api/auth/login', { email: 'RS Motocons', password: PW })).status, 200);
+    ck3 = null;
+    eq((await call3('/api/auth/login', { email: 'RS Motocons', password: 'Wrong-Passphrase-1' })).status, 401);
+  });
+  app3.server.close();
+}
+
 await t('a weak bootstrap password is refused with the requirement explained', async () => {
   // A stand-in with the same shape as a weak password: digits + lowercase only.
   const WEAK = '123' + 'trythis' + '123';
