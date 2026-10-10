@@ -182,3 +182,116 @@ CREATE INDEX IF NOT EXISTS idx_weekly_user ON weekly_submissions(user_id, week_s
 CREATE INDEX IF NOT EXISTS idx_weekly_coach ON weekly_submissions(coach_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_open ON weekly_submissions(user_id, week_start)
   WHERE status IN ('submitted', 'changes_requested');
+
+-- ===================================================== security and privacy
+-- Two-step verification with an authenticator app. The secret is sealed with
+-- DATA_ENC_KEY when that secret is configured. last_step blocks code reuse.
+CREATE TABLE IF NOT EXISTS mfa_totp (
+  user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret       TEXT NOT NULL,
+  enabled_at   INTEGER,
+  last_step    INTEGER,
+  created_at   INTEGER NOT NULL
+);
+-- Single-use recovery codes, stored as salted password hashes.
+CREATE TABLE IF NOT EXISTS mfa_recovery (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  TEXT NOT NULL,
+  used_at    INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mfa_recovery_user ON mfa_recovery(user_id);
+-- A password that was right, waiting for the second step. No session exists yet.
+CREATE TABLE IF NOT EXISTS pending_logins (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  ip         TEXT,
+  user_agent TEXT
+);
+-- Recent authentication per session, for sensitive actions.
+CREATE TABLE IF NOT EXISTS session_reauth (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  at         INTEGER NOT NULL
+);
+-- Passkeys (WebAuthn). public_key is a JWK. sign_count detects cloned authenticators.
+CREATE TABLE IF NOT EXISTS passkeys (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  public_key   TEXT NOT NULL,
+  alg          INTEGER NOT NULL,
+  sign_count   INTEGER NOT NULL DEFAULT 0,
+  label        TEXT,
+  transports   TEXT,
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT,
+  kind       TEXT NOT NULL,
+  challenge  TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+-- Choices the server enforces. Everything else lives in the user's state document.
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id             TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  ai_reviews          INTEGER NOT NULL DEFAULT 0,
+  share_with_reviewer INTEGER NOT NULL DEFAULT 1,
+  updated_at          INTEGER NOT NULL
+);
+-- Consent and acknowledgement history. Append only: one row per change.
+CREATE TABLE IF NOT EXISTS consents (
+  id      TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind    TEXT NOT NULL,
+  version TEXT,
+  granted INTEGER NOT NULL,
+  at      INTEGER NOT NULL,
+  source  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_consents_user ON consents(user_id, kind, at);
+-- Correction and privacy requests from members to administrators.
+CREATE TABLE IF NOT EXISTS account_requests (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'open',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+-- Pending email changes. The token is stored hashed.
+CREATE TABLE IF NOT EXISTS email_changes (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  new_email  TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at    INTEGER
+);
+-- Administrator-edited page content (About, Why) and the privacy checklist ticks.
+CREATE TABLE IF NOT EXISTS site_content (
+  key        TEXT PRIMARY KEY,
+  content    TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT
+);
+CREATE TABLE IF NOT EXISTS checklist_manual (
+  id         TEXT PRIMARY KEY,
+  done       INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT
+);
+-- Devices seen per account, for new-device alerts on privileged accounts.
+CREATE TABLE IF NOT EXISTS known_devices (
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device     TEXT NOT NULL,
+  first_seen INTEGER NOT NULL,
+  PRIMARY KEY (user_id, device)
+);

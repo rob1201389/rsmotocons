@@ -420,7 +420,7 @@ function abandonSession(quiet) {
 
 /* ============================================================== render === */
 const TITLES = { today:'Today', plan:'My plan', workouts:'Workouts', stretch:'Stretch', recovery:'Recovery', more:'More',
-                 train:'Workout', nutrition:'Nutrition', progress:'Progress', library:'Exercises', profile:'Profile' };
+                 train:'Workout', nutrition:'Nutrition', progress:'Progress', library:'Exercises', profile:'Settings' };
 const ALL_TABS = ['today','plan','workouts','stretch','recovery','more','train','nutrition','progress','library','profile'];
 /* Phone bottom bar shows five items; the rest sit under More. On wide screens
    every section is in the side rail. A section highlights the item that owns it. */
@@ -614,6 +614,15 @@ function buildInsight() {
 function renderFuel() {
   const t = macroTargets(S);
   const plan = buildMealPlan(t);
+  /* Foods you exclude in Settings are left out of the suggested plan. Nothing is
+     swapped in; the totals below are recalculated so the gap is visible. */
+  const excl = (S.prefs && S.prefs.foodExclusions) || [];
+  if (excl.length) {
+    plan.plan.forEach(m => { m.items = m.items.filter(i => excl.indexOf(i.food) < 0); });
+    plan.plan = plan.plan.filter(m => m.items.length);
+    const tot = planTotals(plan.plan); plan.totals = { kcal: Math.round(tot.kcal), p: Math.round(tot.p), c: Math.round(tot.c), f: Math.round(tot.f) };
+    plan.excluded = excl.map(k => (FOOD[k] || {}).label || k);
+  }
   const c = $('#fuelCard');
   c.innerHTML = `
     <div class="grid4">
@@ -633,6 +642,7 @@ function renderFuel() {
       <span class="muted" style="font-size:.84rem">${items}</span></div>`));
   });
   det.appendChild(el('p','dim',`Plan totals ${plan.totals.kcal} kcal · ${plan.totals.p}P ${plan.totals.c}C ${plan.totals.f}F. Regenerated whenever your targets change.`));
+  if (plan.excluded) det.appendChild(el('p','dim',`Left out because you excluded them: ${esc(plan.excluded.join(', '))}. Nothing was substituted, so the totals are lower than your targets by ${Math.max(0, t.kcal - plan.totals.kcal)} kcal and ${Math.max(0, t.protein - plan.totals.p)} g protein. Change exclusions in Settings.`));
   det.lastChild.style.cssText = 'font-size:.78rem;margin-top:10px';
   c.appendChild(det);
 }
@@ -1559,19 +1569,26 @@ function openStretch(s) {
 function renderProfile() {
   const P = S.profile;
   const g = $('#profGoals'); g.innerHTML = '';
-  g.appendChild(selectField('Goal','goal',P.goal,[['recomp','Recomposition'],['strength','Strength'],['hypertrophy','Hypertrophy'],['fatloss','Fat loss']],v=>{P.goal=v;}));
-  g.appendChild(selectField('Experience','experience',P.experience,[['novice','Novice'],['intermediate','Intermediate'],['advanced','Advanced']],v=>{P.experience=v;}));
-  g.appendChild(numField('Training days per week', P.trainingDaysPerWeek, 1, v => P.trainingDaysPerWeek = v));
-  g.appendChild(numField('Session length (min)', P.sessionMinutes, 5, v => P.sessionMinutes = v));
+  /* Once a plan exists its goals are set in the plan setup, so only the fields the
+     setup does not ask for stay here (Settings shows them collapsed). */
+  const planned = !!(window.Plan && Plan.hasPlan && Plan.hasPlan(S));
+  if (!planned) {
+    g.appendChild(selectField('Goal','goal',P.goal,[['recomp','Recomposition'],['strength','Strength'],['hypertrophy','Hypertrophy'],['fatloss','Fat loss']],v=>{P.goal=v;}));
+    g.appendChild(selectField('Experience','experience',P.experience,[['novice','Novice'],['intermediate','Intermediate'],['advanced','Advanced']],v=>{P.experience=v;}));
+    g.appendChild(numField('Training days per week', P.trainingDaysPerWeek, 1, v => P.trainingDaysPerWeek = v));
+    g.appendChild(numField('Session length (min)', P.sessionMinutes, 5, v => P.sessionMinutes = v));
+  }
   g.appendChild(numField('Bodyweight (kg)', P.bodyweightKg, 0.5, v => P.bodyweightKg = v));
   g.appendChild(numField('Max load jump (%)', P.maxLoadJumpPct, 1, v => P.maxLoadJumpPct = v));
   g.appendChild(numField('Treat as a break after (days)', P.returnBreakDays, 1, v => P.returnBreakDays = v));
 
-  const prog = currentProgram();
-  g.appendChild(el('p','dim',
-    `<b style="color:var(--text)">Your programme:</b> ${esc(prog.explain)}` +
-    (prog.notes && prog.notes.length ? '<br>' + prog.notes.map(esc).join('<br>') : '')));
-  g.lastChild.style.cssText = 'font-size:.82rem;margin:12px 0 0;line-height:1.5';
+  if (!planned) {
+    const prog = currentProgram();
+    g.appendChild(el('p','dim',
+      `<b style="color:var(--text)">Your programme:</b> ${esc(prog.explain)}` +
+      (prog.notes && prog.notes.length ? '<br>' + prog.notes.map(esc).join('<br>') : '')));
+    g.lastChild.style.cssText = 'font-size:.82rem;margin:12px 0 0;line-height:1.5';
+  }
 
   const eq = $('#profEquip'); eq.innerHTML = '';
   Object.keys(P.equipment).forEach(k => {
@@ -1725,6 +1742,9 @@ function applyTheme() {
   const m = S && S.prefs ? S.prefs.reducedMotion : 'system';
   if (m === 'on') document.documentElement.setAttribute('data-motion','off');
   else document.documentElement.removeAttribute('data-motion');
+  const ts = S && S.prefs ? S.prefs.textSize : 'normal';
+  if (ts === 'large' || ts === 'larger') document.documentElement.setAttribute('data-text', ts);
+  else document.documentElement.removeAttribute('data-text');
 }
 
 /* ------------------------------------------------------- bodyweight ----- */
@@ -1753,6 +1773,8 @@ let AUTH_MODE = 'local';     // local | server | offline
    views are: login, signup, setup, password, pending, blocked, welcome. */
 function showGate(view, opts) {
   opts = opts || {};
+  /* A shared link to #about, #why or #privacy shows that page, not the sign-in pop-up. */
+  if (view === 'login' && !opts.notice && !opts.foot && /^#(about|why|privacy)(\/|$)/.test(location.hash)) view = 'welcome';
   if (window.AuthUI) AuthUI.show(view, opts);
 }
 function hideGate() {
@@ -1989,6 +2011,7 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
    rules; everything about state, saving and sessions stays here. */
 window.RecompHost = {
   get S() { return S; }, set S(v) { S = v; },
+  applyTheme, doExport, blankState: () => blankState(),
   persist, go, renderAll, toast, say, banner, openSheet, closeSheet, todayISO, esc, el, $, $$,
   startSlot, startAdHoc, currentSession, finishSession, openCheckin, pushUndo, startTimer, endTimer, mkFig,
   seedSets, decideForEx, get live() { return live; },

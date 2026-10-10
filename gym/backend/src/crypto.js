@@ -66,18 +66,137 @@ function newId(prefix) {
   return `${prefix}_${Date.now().toString(36)}${b64(randomBytes(9))}`;
 }
 
-/* Password policy. If the configured bootstrap password is rejected, the
-   caller surfaces this reason rather than lowering the bar. */
-function passwordProblems(pw) {
+/* Password policy, following OWASP ASVS 5.0 (6.2.x): length, not composition.
+   At least 12 characters, up to 256, any characters allowed, and not a common
+   or context-specific password. Breached-password screening is separate and
+   asynchronous (screenPassword). */
+const COMMON = new Set(['password', 'password1', 'password12', 'password123', 'password1234', 'passw0rd', 'qwerty', 'qwertyuiop',
+  'qwerty123', '123456789012', '1234567890', '12345678910', '111111111111', 'iloveyou', 'letmein', 'welcome', 'welcome123',
+  'admin', 'administrator', 'changeme', 'trustno1', 'football', 'baseball', 'superman', 'dragon', 'monkey', 'sunshine',
+  'princess', 'starwars', 'whatever', 'abcdefghijkl', 'abc123abc123', 'zaq12wsxcde3', '1q2w3e4r5t6y', 'qazwsxedcrfv',
+  'australia', 'melbourne', 'sydney', 'brisbane', 'adelaide', 'canberra', 'kangaroo', 'fitness', 'workout', 'bodybuilding',
+  'gymrat', 'strength', 'recomposition']);
+const CONTEXT = ['recomp', 'rsmotocons', 'rs motocons', 'motocons', 'gym.rsmotocons'];
+function passwordProblems(pw, ctx) {
   const out = [];
-  if (!pw || pw.length < 12) out.push('at least 12 characters');
-  if (!/[a-z]/.test(pw || '')) out.push('a lowercase letter');
-  if (!/[A-Z]/.test(pw || '') && !/[^A-Za-z0-9]/.test(pw || ''))
-    out.push('an uppercase letter or a symbol');
-  if (!/[0-9]/.test(pw || '')) out.push('a digit');
-  if (/^(.)\1+$/.test(pw || '')) out.push('more than one distinct character');
+  const p = typeof pw === 'string' ? pw : '';
+  if (p.length < 12) out.push('at least 12 characters');
+  if (p.length > 256) out.push('no more than 256 characters');
+  if (p && /^(.)\1+$/.test(p)) out.push('more than one distinct character');
+  const low = p.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const words = CONTEXT.concat(((ctx && ctx.words) || []).map(w => String(w || '').toLowerCase()).filter(w => w.length >= 4));
+  if (low && (COMMON.has(low) || COMMON.has(low.replace(/\d+$/, '')) || words.some(w => { const x = w.replace(/[^a-z0-9]/g, ''); return x.length >= 4 && low.replace(/\d+$/, '') === x; })))
+    out.push('to be less easy to guess (it is a common password or uses the app or your own name)');
   return out;
 }
+/* Have I Been Pwned range API (k-anonymity): only the first five hex characters of
+   the SHA-1 hash leave the server. Resolves true (breached), false (not found) or
+   null (could not check; the caller lets the password through and does not log it). */
+async function sha1hexUpper(s) {
+  const d = await crypto.subtle.digest('SHA-1', enc.encode(s));
+  return [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+async function pwnedPassword(pw, opts) {
+  opts = opts || {};
+  if (opts.disabled) return null;
+  const f = opts.fetch || (typeof fetch !== 'undefined' ? fetch : null);
+  if (!f) return null;
+  const h = await sha1hexUpper(pw);
+  const prefix = h.slice(0, 5), suffix = h.slice(5);
+  try {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => ctrl && ctrl.abort(), opts.timeoutMs || 2500);
+    const r = await f('https://api.pwnedpasswords.com/range/' + prefix, { headers: { 'Add-Padding': 'true', 'User-Agent': 'Recomp-password-check' }, signal: ctrl ? ctrl.signal : undefined });
+    clearTimeout(timer);
+    if (!r.ok) return null;
+    const text = await r.text();
+    for (const line of text.split('\n')) { const [suf, n] = line.trim().split(':'); if (suf === suffix && parseInt(n, 10) > 0) return true; }
+    return false;
+  } catch (e) { return null; }
+}
+/* Policy plus breach check. Returns an array of problems (empty = fine). */
+async function screenPassword(pw, env, ctx, fetchImpl) {
+  const problems = passwordProblems(pw, ctx);
+  if (problems.length) return problems;
+  const off = env && (env.HIBP_CHECK === 'off' || env.HIBP_CHECK === '0');
+  const breached = await pwnedPassword(pw, { disabled: off, fetch: fetchImpl });
+  if (breached === true) return ['to not be one that has appeared in a known data breach (choose a different password)'];
+  return [];
+}
+
+/* ------------------------------------------------------------ TOTP (RFC 6238) */
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32Encode(bytes) {
+  let bits = 0, value = 0, out = '';
+  for (const b of bytes) { value = (value << 8) | b; bits += 8; while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
+}
+function base32Decode(s) {
+  const clean = String(s).toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0, value = 0; const out = [];
+  for (const ch of clean) { value = (value << 5) | B32.indexOf(ch); bits += 5; if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; } }
+  return new Uint8Array(out);
+}
+async function hotp(keyBytes, counter, digits) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const msg = new Uint8Array(8); let c = counter;
+  for (let i = 7; i >= 0; i--) { msg[i] = c & 255; c = Math.floor(c / 256); }
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
+  const off = mac[mac.length - 1] & 15;
+  const bin = ((mac[off] & 127) << 24) | (mac[off + 1] << 16) | (mac[off + 2] << 8) | mac[off + 3];
+  return String(bin % Math.pow(10, digits || 6)).padStart(digits || 6, '0');
+}
+/* Returns the matched time step, or null. Accepts one step either side for clock drift.
+   The server clock is the time source; the client never supplies a time. */
+async function verifyTotp(secretB32, code, nowMs, lastStep) {
+  const c = String(code || '').replace(/\s/g, '');
+  if (!/^\d{6}$/.test(c)) return null;
+  const key = base32Decode(secretB32);
+  const step = Math.floor(nowMs / 30000);
+  for (const d of [0, -1, 1]) {
+    const st = step + d;
+    if (lastStep != null && st <= lastStep) continue;          // each code works once
+    if (timingSafeEqual(enc.encode(await hotp(key, st, 6)), enc.encode(c))) return st;
+  }
+  return null;
+}
+
+/* ------------------------------------------------- field encryption at rest
+   AES-256-GCM with a key from the DATA_ENC_KEY secret (base64, 32 bytes). Stored
+   form: enc1:<keyId>:<iv b64>:<ciphertext b64>. Values written before the key was
+   set (plain text) are still read; they are encrypted on their next write. */
+const keyCache = new Map();
+async function encKey(env) {
+  const raw = env && env.DATA_ENC_KEY;
+  if (!raw) return null;
+  if (keyCache.has(raw)) return keyCache.get(raw);
+  const bytes = unb64(String(raw).trim());
+  if (bytes.length !== 32) throw new Error('DATA_ENC_KEY must be 32 bytes, base64 encoded');
+  const k = { id: (env.DATA_ENC_KEY_ID || 'k1').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12) || 'k1',
+    key: await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt']) };
+  keyCache.set(raw, k); return k;
+}
+async function sealText(env, text) {
+  if (text == null) return text;
+  const k = await encKey(env); if (!k) return text;
+  const iv = randomBytes(12);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k.key, enc.encode(String(text)));
+  return `enc1:${k.id}:${b64(iv)}:${b64(ct)}`;
+}
+async function openText(env, stored) {
+  if (stored == null || typeof stored !== 'string' || !stored.startsWith('enc1:')) return stored;
+  const [, kid, ivb, ctb] = stored.split(':');
+  const k = await encKey(env);
+  if (!k) throw new Error('Encrypted data found but DATA_ENC_KEY is not set');
+  const prev = env.DATA_ENC_KEY_PREVIOUS && kid !== k.id ? await encKey({ DATA_ENC_KEY: env.DATA_ENC_KEY_PREVIOUS, DATA_ENC_KEY_ID: kid }) : null;
+  const use = kid === k.id ? k : prev;
+  if (!use) throw new Error('No key for encrypted data id ' + kid);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(ivb) }, use.key, unb64(ctb));
+  return new TextDecoder().decode(pt);
+}
+const isSealed = v => typeof v === 'string' && v.startsWith('enc1:');
 
 export { hashPassword, verifyPassword, randomToken, randomBytes, sha256hex, newId,
-         timingSafeEqual, passwordProblems, b64, PBKDF2_ITERATIONS };
+         timingSafeEqual, passwordProblems, screenPassword, pwnedPassword, sha1hexUpper, b64, unb64, PBKDF2_ITERATIONS,
+         base32Encode, base32Decode, hotp, verifyTotp, sealText, openText, isSealed, encKey };

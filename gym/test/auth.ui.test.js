@@ -94,6 +94,7 @@ const $ = (b, s) => b.d.querySelector(s);
 const $$ = (b, s) => [...b.d.querySelectorAll(s)];
 const text = el => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const vis = el => !!el && !el.closest('[hidden]');
+function check(b, id, on) { const el = b.d.getElementById(id); el.checked = on !== false; el.dispatchEvent(new b.w.Event('change', { bubbles: true })); el.dispatchEvent(new b.w.Event('input', { bubbles: true })); }
 function setIn(b, id, value) {
   const el = b.d.getElementById(id); el.value = value;
   el.dispatchEvent(new b.w.Event('input', { bubbles: true }));
@@ -267,27 +268,31 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
     ok(/name/i.test(text($(b, '#signupName-err'))), text($(b, '#signupName-err')));
     ok(/valid email/.test(text($(b, '#signupEmail-err'))));
     const pe = text($(b, '#signupPw-err'));
-    ok(/^Your password needs at least 12 characters, an uppercase letter or a symbol and a digit\.$/.test(pe), pe);
+    ok(/^Your password needs at least 12 characters\.$/.test(pe), pe);
+    ok(/privacy policy/.test(text($(b, '#signupPrivacy-err'))), 'privacy acknowledgement not required');
+    ok(/cannot run your plan/.test(text($(b, '#signupHealth-err'))), 'health consent not required');
     ok(/valid email/.test($(b, '#authAlert').textContent), 'not announced');
     eq(b.srv.calls.filter(c => c.path === '/api/auth/signup').length, 0);
   });
   await t('the password checklist updates as you type and states "Done" or "Needed" in text', () => {
     const lis = () => $$(b, '#signupPw-req li');
-    eq(lis().length, 4);
-    setIn(b, 'signupPw', 'longenoughpass');
-    eq(lis().map(l => l.className), ['met', 'met', '', '']);
-    ok(/Done/.test(lis()[0].textContent) && /Needed/.test(lis()[3].textContent));
-    setIn(b, 'signupPw', 'Longenough-Pass-12');
-    eq(lis().map(l => l.className), ['met', 'met', 'met', 'met']);
+    eq(lis().length, 2);                                     // length and not-common, per OWASP ASVS 5.0 (no composition rules)
+    setIn(b, 'signupPw', 'short');
+    eq(lis().map(l => l.className), ['', 'met']);
+    ok(/Needed/.test(lis()[0].textContent) && /Done/.test(lis()[1].textContent));
+    setIn(b, 'signupPw', 'password1234');
+    eq(lis().map(l => l.className), ['met', '']);
+    setIn(b, 'signupPw', 'correct horse battery');
+    eq(lis().map(l => l.className), ['met', 'met']);
     ok($(b, '#signupPw-err').hidden, 'stale error left showing');
     ok($(b, '#signupPw').getAttribute('aria-describedby').includes('signupPw-req'));
   });
   await t('the password policy matches the server for tricky cases', () => {
     const P = b.w.AuthUI.passwordProblems;
     eq(P('Sign-Up-Pass-12'), []);
-    eq(P('aaaaaaaaaaaaaaaa'), ['an uppercase letter or a symbol', 'a digit', 'more than one distinct character']);
-    eq(P('abcdefghijk1'), ['an uppercase letter or a symbol']);
-    eq(P('ABCDEFGHIJK1'), ['a lowercase letter']);
+    eq(P('aaaaaaaaaaaaaaaa'), ['more than one distinct character']);
+    eq(P('abcdefghijk1'), []);                                 // composition is not required any more
+    eq(P('recomp123456'), ['to be less easy to guess']);
   });
 
   /* ======================================================================= */
@@ -382,13 +387,14 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
   /* ======================================================================= */
   sec('SIGN UP: check your email, resend, 429, email not configured');
   b = await bootAnon();
-  const fillSignup = () => { click(b, '#tabSignup'); setIn(b, 'signupName', 'Pat Pending'); setIn(b, 'signupEmail', 'Pat@Example.test'); setIn(b, 'signupPw', 'Sign-Up-Pass-12'); };
+  const fillSignup = () => { click(b, '#tabSignup'); setIn(b, 'signupName', 'Pat Pending'); setIn(b, 'signupEmail', 'Pat@Example.test'); setIn(b, 'signupPw', 'Sign-Up-Pass-12'); check(b, 'signupPrivacy'); check(b, 'signupHealth'); };
   await t('a valid sign-up sends the exact body (with the empty honeypot) and shows Check your email', async () => {
     b.srv.routes['POST /api/auth/signup'] = () => json(200, { ok: true, status: 'pending_verification', emailSent: true });
     fillSignup(); submit(b, 'signupForm');
     await until(() => $(b, '#authTitle').textContent === 'Check your email', 'check-your-email');
     const c = b.srv.last('POST', '/api/auth/signup');
-    eq(c.body, { name: 'Pat Pending', email: 'pat@example.test', password: 'Sign-Up-Pass-12', website: '' });
+    eq(Object.assign({}, c.body, { privacyNoticeVersion: typeof c.body.privacyNoticeVersion === 'string' && c.body.privacyNoticeVersion.length > 0 }),
+      { name: 'Pat Pending', email: 'pat@example.test', password: 'Sign-Up-Pass-12', website: '', privacyNoticeVersion: true, healthConsent: true });
     eq(c.headers['X-Recomp-Request'], '1');
     ok(/pat@example\.test/.test(text($(b, '#ceMsg'))), text($(b, '#ceMsg')));
     ok(/administrator reviews/.test(text($(b, '#ceNote'))));
@@ -448,7 +454,7 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
 
   /* ======================================================================= */
   sec('VERIFY LINK');
-  const TOKEN = 'T0ken-abcdefghijklmnopqrstuvwxyz-0123456789';
+  const TOKEN = 'T0ken-abcdefghijklmnopqrstuvwxyz-0123456789'; // gitleaks:allow (synthetic test credential)
   await t('/?verify=TOKEN posts the token, shows success, and removes it from the address bar', async () => {
     const calls = [];
     b = await bootAnon({
@@ -699,7 +705,7 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
     ok(/do not match/.test(text($(b, '#setupConfirm-err'))));
     setIn(b, 'setupConfirm', 'Owner-Pass-12345'); submit(b, 'setupForm');
     await until(() => $(b, '#authGate').hidden, 'gate to close');
-    eq(b.srv.last('POST', '/api/auth/setup').body, { email: 'owner@example.test', password: 'Owner-Pass-12345' });
+    eq(b.srv.last('POST', '/api/auth/setup').body, { email: 'owner@example.test', password: 'Owner-Pass-12345' }); // gitleaks:allow (synthetic test credential)
   });
   await t('a forced password change shows in the dialog, posts current and next, and opens the app', async () => {
     b = await bootAnon({
@@ -853,14 +859,15 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
     eq($$(ad, '#admPerms input').map(i => i.checked), [true, true, false, false, false, true, true]);
   });
   await t('Approve sends the exact decision body: role, every permission, and the private note', async () => {
-    const reviews = $(ad, '#admPerms input[data-feature="reviews"]'); reviews.checked = false;
-    reviews.dispatchEvent(new ad.w.Event('change', { bubbles: true }));
+    const reviews = $(ad, '#admPerms input[data-feature="reviews"]');
+    ok(reviews.disabled && reviews.checked, 'weekly reviews are always on and cannot be unticked');
+    reviews.checked = false; reviews.dispatchEvent(new ad.w.Event('change', { bubbles: true }));   // even a forced untick is ignored
     const dn = $(ad, '#admDecisionNote'); dn.value = '  Paid up  '; dn.dispatchEvent(new ad.w.Event('input', { bubbles: true }));
     click(ad, '#admApprove');
     await until(() => ad.srv.last('POST', '/api/admin/requests/sr1/decision'), 'decision');
     const c = ad.srv.last('POST', '/api/admin/requests/sr1/decision');
     eq(c.body, { action: 'approve', role: 'coach',
-      permissions: { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: false },
+      permissions: { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: true },
       note: 'Paid up' });
     eq(c.headers['X-Recomp-Request'], '1');
     ok(!('overrideVerification' in c.body));
@@ -1033,8 +1040,9 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
       const dbm = await import(url.pathToFileURL(path.join(BACKEND, 'src/db.js')).href);
       const authm = await import(url.pathToFileURL(path.join(BACKEND, 'src/auth.js')).href);
       const mail = await import(url.pathToFileURL(path.join(BACKEND, 'src/mail.js')).href);
+      const cry = await import(url.pathToFileURL(path.join(BACKEND, 'src/crypto.js')).href);
       const { DatabaseSync } = await import('node:sqlite');
-      be = { api, dbm, authm, mail, DatabaseSync };
+      be = { api, dbm, authm, mail, cry, DatabaseSync };
     } catch (e) { why = e.message; }
     if (!be) console.log('  SKIP end-to-end: backend modules could not load (' + why + ')');
     else {
@@ -1042,7 +1050,11 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
       const OWNER_PW = 'Owner-Passphrase-99', OWNER_NEW = 'Owner-New-Passphrase-7';
       const db = be.dbm.nodeDb(be.DatabaseSync, ':memory:');
       db.exec(fs.readFileSync(path.join(BACKEND, 'schema.sql'), 'utf8'));
-      const env = { OWNER_EMAIL: 'owner@example.test', OWNER_NAME: 'Owner', BOOTSTRAP_OWNER_PASSWORD: OWNER_PW, MAIL_PROVIDER: 'outbox' };
+      const env = { OWNER_EMAIL: 'owner@example.test', OWNER_NAME: 'Owner', BOOTSTRAP_OWNER_PASSWORD: OWNER_PW, MAIL_PROVIDER: 'outbox', HIBP_CHECK: 'off' };
+      /* The owner has two-step verification; codes are computed like an authenticator app. Each works
+         once, so before a fresh login the fixture forgets the last used step. */
+      let ownerSecret = null;
+      const ownerCode = async () => { db.run("UPDATE mfa_totp SET last_step = NULL WHERE user_id = (SELECT id FROM users WHERE role = 'owner')"); return be.cry.hotp(be.cry.base32Decode(ownerSecret), Math.floor(Date.now() / 30000), 6); };
       await be.authm.bootstrapOwner(db, env, Date.now());
       be.mail.outbox.length = 0;
       let ipN = 0;
@@ -1060,8 +1072,7 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
           const method = (opts.method || 'GET').toUpperCase();
           const req = new Request(U, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : opts.body });
           const out = await be.api.handle(req, { db, env, ip });
-          const sc = out.headers.get('set-cookie');
-          if (sc) { const [kv, ...attrs] = sc.split(';'); const i = kv.indexOf('='); const k = kv.slice(0, i), v = kv.slice(i + 1);
+          for (const sc of out.headers.getSetCookie()) { const [kv, ...attrs] = sc.split(';'); const i = kv.indexOf('='); const k = kv.slice(0, i), v = kv.slice(i + 1);
             if (!v || attrs.some(a => /max-age=0/i.test(a))) jar.delete(k); else jar.set(k, v); }
           const text0 = await out.text(); let data = null; try { data = JSON.parse(text0); } catch (e) {}
           return { status: out.status, ok: out.status >= 200 && out.status < 300, json: async () => data, headers: { get: () => null } };
@@ -1074,6 +1085,9 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
       const oj = async (p, m, body) => { const r = await ownerFetch(p, { method: m, headers: { 'Content-Type': 'application/json', 'X-Recomp-Request': '1' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, data: await r.json() }; };
       await oj('/api/auth/login', 'POST', { email: 'owner@example.test', password: OWNER_PW });
       await oj('/api/auth/password', 'POST', { current: OWNER_PW, next: OWNER_NEW });
+      { const bg = await oj('/api/auth/mfa/totp/begin', 'POST', {}); ownerSecret = bg.data.secret;
+        const cf = await oj('/api/auth/mfa/totp/confirm', 'POST', { code: await be.cry.hotp(be.cry.base32Decode(ownerSecret), Math.floor(Date.now() / 30000), 6) });
+        if (cf.status !== 200) throw new Error('owner MFA enrolment failed'); }
 
       let person = bootReal();
       await until(() => !$(person, '#authGate').hidden, 'gate'); await wait(80);
@@ -1081,6 +1095,7 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
       await t('E2E sign up through the pop-up creates a pending account and an emailed link', async () => {
         click(person, '#tabSignup');
         setIn(person, 'signupName', 'Erin Example'); setIn(person, 'signupEmail', 'erin@example.test'); setIn(person, 'signupPw', 'Erin-Strong-Pass-1');
+        check(person, 'signupPrivacy'); check(person, 'signupHealth');
         submit(person, 'signupForm');
         await until(() => !$(person, '[data-view="check-email"]').hidden, 'check-your-email');
         ok(/erin@example\.test/.test(text($(person, '#ceMsg'))));
@@ -1121,6 +1136,9 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
         const adm = bootReal();
         await until(() => !$(adm, '#authGate').hidden, 'gate'); await wait(80);
         setIn(adm, 'loginEmail', 'owner@example.test'); setIn(adm, 'loginPassword', OWNER_NEW); submit(adm, 'loginForm');
+        await until(() => !$(adm, '#mfaForm').hidden, 'two-step verification step');
+        ok(!adm.w.AUTH.user(), 'no session before the second step');
+        setIn(adm, 'mfaCode', await ownerCode()); submit(adm, 'mfaForm');
         await until(() => appReady(adm), 'owner app');
         adm.w.__recomp.go('profile');
         await openAdmin(adm);
@@ -1163,7 +1181,7 @@ const GENERIC_NEW_USER = (o) => user(Object.assign({ id: 'u9', email: 'new@examp
       await t('E2E reject, then the person gets the no-access page and cannot use the app', async () => {
         const f2 = inProcessFetch();
         const c = async (p, m, b) => { const r = await f2(p, { method: m, headers: { 'Content-Type': 'application/json', 'X-Recomp-Request': '1' }, body: b ? JSON.stringify(b) : undefined }); return { status: r.status, data: await r.json() }; };
-        await c('/api/auth/signup', 'POST', { name: 'Rex Reject', email: 'rex@example.test', password: 'Rex-Strong-Pass-1', website: '' });
+        await c('/api/auth/signup', 'POST', { name: 'Rex Reject', email: 'rex@example.test', password: 'Rex-Strong-Pass-1', website: '', privacyNoticeVersion: 'v1', healthConsent: true }); // gitleaks:allow (synthetic test credential)
         const sr = db.get('SELECT id FROM signup_requests WHERE email = ?', 'rex@example.test');
         const d = await oj(`/api/admin/requests/${sr.id}/decision`, 'POST', { action: 'reject', note: 'No' });
         eq(d.status, 200);

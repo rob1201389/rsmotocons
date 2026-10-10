@@ -8,13 +8,14 @@
    3. skipWaiting() ran unconditionally, so deploying mid-workout could swap the
       running code. The new worker waits, and activates only when the page says
       it is safe. */
-const VERSION = 'v10';
+const VERSION = 'v11';
 const CACHE_PREFIX = 'recomp-';
 const CACHE = CACHE_PREFIX + VERSION;
 
 const SHELL = ['./', './index.html', './app.js', './core.js', './engine.js', './exercises.js',
   './authclient.js', './authui.js', './admin.js', './figure.js', './lifts.js', './stretches.js', './plan.js', './review.js', './garmin.js', './library.js',
-  './views.css', './views-core.js', './views-today.js', './views-plan.js', './views-review.js', './views-move.js', './manifest.webmanifest',
+  './views.css', './content.css', './views-content.js', './views-settings.js', './views-admin-site.js',
+  './content/about.json', './content/why.json', './content/privacy.json', './views-core.js', './views-today.js', './views-plan.js', './views-review.js', './views-move.js', './manifest.webmanifest',
   './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

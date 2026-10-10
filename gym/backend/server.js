@@ -37,8 +37,11 @@ export async function createApp(opts = {}) {
           headers: req.headers,
           body: ['GET','HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
         });
-        const out = await handle(request, { db, env, ip: req.socket.remoteAddress, fetch: opts.fetch, aiTimeoutMs: opts.aiTimeoutMs });
-        res.writeHead(out.status, Object.fromEntries(out.headers));
+        const out = await handle(request, { db, env, ip: req.socket.remoteAddress, fetch: opts.fetch, hibpFetch: opts.hibpFetch, aiTimeoutMs: opts.aiTimeoutMs });
+        const hdrs = Object.fromEntries([...out.headers].filter(([k]) => k.toLowerCase() !== 'set-cookie'));
+        const cookies = out.headers.getSetCookie ? out.headers.getSetCookie() : [];
+        if (cookies.length) hdrs['Set-Cookie'] = cookies;     // keep every cookie, not just the last
+        res.writeHead(out.status, hdrs);
         res.end(Buffer.from(await out.arrayBuffer()));
         return;
       }

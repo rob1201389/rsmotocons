@@ -1,0 +1,58 @@
+name: Security checks
+
+# Runs on every push and pull request, and weekly so new advisories are caught
+# even when nothing changes. Nothing here has access to deployment secrets.
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          set -e
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The app and the worker have no runtime dependencies. The test tools do.
+      - name: Audit test dependencies
+        working-directory: gym/test
+        run: |
+          npm install --no-audit --no-fund
+          npm audit --audit-level=high
+
+  tests:
+    name: Backend and app tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Backend security and API tests
+        working-directory: gym/backend
+        run: npm test
+      - name: App tests
+        working-directory: gym/test
+        run: |
+          npm install --no-audit --no-fund
+          ./run-all.sh

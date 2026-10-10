@@ -1,3 +1,4 @@
+import { sharingAllowed } from './account.js';
 /* Roles, features and per-user overrides.
 
    Enforcement is server-side on every request. The browser is told what it may
@@ -16,6 +17,10 @@ export const FEATURES = [
   'reviews'      // workout reviews
 ];
 
+/* Features every account has, whatever its role or overrides: weekly reviews are
+   part of how the plan adapts, so no one can be switched off from them. */
+export const ALWAYS_ON = ['reviews'];
+
 /* Sensible presets. A per-user override wins over its role's preset. */
 export const PRESETS = {
   owner:  { training:true,  library:true,  nutrition:true,  recipes:true,  garmin:true,  progress:true,  reviews:true },
@@ -29,7 +34,7 @@ export function effectivePermissions(user) {
   let over = {};
   try { over = user.permissions ? JSON.parse(user.permissions) : {}; } catch (e) { over = {}; }
   const out = {};
-  FEATURES.forEach(f => { out[f] = (f in over) ? !!over[f] : !!base[f]; });
+  FEATURES.forEach(f => { out[f] = ALWAYS_ON.includes(f) ? true : (f in over) ? !!over[f] : !!base[f]; });
   return out;
 }
 
@@ -54,5 +59,7 @@ export async function mayAccessUserData(db, actor, targetId) {
     'SELECT 1 AS x FROM coach_assignments WHERE coach_id = ? AND member_id = ?', actor.id, targetId);
   if (!row) return { ok: false, reason: 'not_assigned' };
   if (!can(actor, 'reviews')) return { ok: false, reason: 'no_reviews_permission' };
+  // The member decides: with sharing off, no reviewer can read their records.
+  if (!(await sharingAllowed(db, targetId))) return { ok: false, reason: 'sharing_off' };
   return { ok: true, scope: 'assigned' };
 }

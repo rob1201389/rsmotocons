@@ -22,8 +22,10 @@ const Admin = (function () {
     ['recipes',   'Recipes', 'Recipes and meal planning'],
     ['garmin',    'Garmin import', 'Bring in Garmin data'],
     ['progress',  'Progress', 'Charts and records'],
-    ['reviews',   'Workout reviews', 'Send and receive reviews']
+    ['reviews',   'Weekly reviews', 'Weekly check-in, coach report and reviews']
   ];
+  /* Mirrors ALWAYS_ON in rbac.js: everyone gets weekly reviews. */
+  const ALWAYS_ON = ['reviews'];
   const PRESETS = {
     member: { training: true, library: true, nutrition: true, recipes: true, garmin: true, progress: true, reviews: true },
     coach:  { training: true, library: true, nutrition: false, recipes: false, garmin: false, progress: true, reviews: true }
@@ -203,7 +205,7 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
     t.focus();
   }
   function onKey(e) {
-    if (!st.open) return;
+    if (!st.open || st.paused) return;
     if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation();
       if (st.busy) return;
@@ -221,9 +223,20 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
   }
 
   /* -------------------------------------------------------- data ------ */
+  /* Sensitive admin actions need a recent password (and code) check. The server
+     says so with code 'reauth_required'; ask once above this screen and retry. */
   async function call(fn) {
-    try { return await fn(); }
-    catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    let r;
+    try { r = await fn(); } catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    if (r && r.code === 'reauth_required' && window.Settings) {
+      st.paused = true; inertBackground(false); root.setAttribute('inert', ''); document.body.classList.add('adm-reauth');
+      let ok = false;
+      try { ok = await Settings.askReauth('Confirm it is you before changing someone\'s access.'); }
+      finally { root.removeAttribute('inert'); document.body.classList.remove('adm-reauth'); inertBackground(true); st.paused = false; }
+      if (!ok) return { ok: false, status: 403, error: 'Not changed: your identity was not confirmed.', data: {}, code: 'reauth_cancelled' };
+      try { r = await fn(); } catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    }
+    return r;
   }
   function explain(r) {
     if (r.status === 0) return OFFLINE;
@@ -417,9 +430,10 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
 
       const fs = h('fieldset', { class: 'adm-f', id: 'admPerms' }, h('legend', { text: 'Features this person can use' }));
       FEATURES.forEach(([key, label, desc]) => {
+        const always = ALWAYS_ON.includes(key);
         fs.appendChild(h('label', { class: 'adm-perm' },
-          h('input', { type: 'checkbox', 'data-feature': key, checked: !!f.perms[key], onchange: ev => { f.perms[key] = ev.target.checked; f.permsTouched = true; } }),
-          h('div', null, h('span', { text: label }), h('small', { text: desc }))));
+          h('input', { type: 'checkbox', 'data-feature': key, checked: always || !!f.perms[key], disabled: always, onchange: ev => { f.perms[key] = ev.target.checked; f.permsTouched = true; } }),
+          h('div', null, h('span', { text: label }), h('small', { text: always ? desc + '. Always on for everyone.' : desc }))));
       });
       card.appendChild(fs);
 
@@ -514,7 +528,7 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
     if (action === 'approve') {
       b.role = f.role;
       b.permissions = {};
-      FEATURES.forEach(([k]) => { b.permissions[k] = !!f.perms[k]; });
+      FEATURES.forEach(([k]) => { b.permissions[k] = ALWAYS_ON.includes(k) || !!f.perms[k]; });
       const n = f.decisionNote.trim(); if (n) b.note = n;
     } else {
       const n = f.reason.trim(); if (n) b.note = n;

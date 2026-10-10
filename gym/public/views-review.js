@@ -239,6 +239,8 @@ const ReviewUI = (function () {
   async function requestAi(report) {
     const S = H().S;
     if (H().AUTH_MODE !== 'server') { report.ai = { status: 'unavailable', reason: 'AI feedback needs an account connected to the server. Showing your statistics summary instead.' }; H().persist(); paintAi(); return; }
+    const st = window.Settings ? await Settings.loadServerSettings() : null;
+    if (!st || !st.aiReviews) { report.ai = { status: 'off', reason: 'AI feedback is off. This summary was written by the app from your statistics. You can turn AI on in Settings.' }; H().persist(); paintAi(); return; }
     report.ai = { status: 'generating' }; paintAi();
     const res = await Review.requestAi(report, S.goals, null, 25000);
     if (SESSION.report !== report) return;
@@ -263,7 +265,7 @@ const ReviewUI = (function () {
       const ul = el('ul', 'vlist'); fb.lines.forEach(l => ul.appendChild(el('li', null, esc(l)))); box.appendChild(ul);
       const why = ai.reason || (ai.status === 'not_requested' ? '' : 'AI feedback is not available right now.');
       if (why) box.appendChild(el('p', 'dim', esc(why)));
-      if (H().AUTH_MODE === 'server' && ai.status !== 'generating') { const rt = el('button', 'btn sm', 'Try AI feedback again'); rt.onclick = () => requestAi(report); box.appendChild(rt); }
+      if (H().AUTH_MODE === 'server' && ai.status !== 'generating' && ai.status !== 'off' && ai.status !== 'removed') { const rt = el('button', 'btn sm', 'Try AI feedback again'); rt.onclick = () => requestAi(report); box.appendChild(rt); }
     }
     return box;
   }
@@ -394,6 +396,8 @@ const ReviewUI = (function () {
   function openHistory() {
     const S = H().S;
     shell('Weekly reviews', (b) => {
+      const sch = Plan.hasPlan(S) ? Review.reviewSchedule(S, Date.now()) : null;
+      if (sch && (sch.status === 'due' || sch.status === 'overdue')) { const go = el('button', 'btn primary block', 'Start this week\'s review'); go.style.marginBottom = '10px'; go.onclick = () => { Views.closeSheet(); open(); }; b.appendChild(go); }
       const list = (S.reviews || []).filter(r => r.status !== 'superseded').slice().sort((a, c) => a.periodEnd < c.periodEnd ? 1 : -1);
       if (!list.length) b.appendChild(el('p', 'muted', 'No reviews yet. Your first one appears when your first full training week ends.'));
       list.forEach(r => {

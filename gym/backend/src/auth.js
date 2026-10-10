@@ -163,10 +163,14 @@ export async function claimOwner(db, env, email, password, ip, ua, now) {
   return { ok: true, token, user };
 }
 
+/* Checks the password. Does not create a session: the caller decides whether a
+   second step is needed first. Failures are throttled per login and IP, and per
+   login across all addresses (credential stuffing from many IPs). */
 export async function login(db, email, password, ip, ua, now) {
   const key = `${normLogin(email)}|${ip || 'noip'}`;
-  if (await rateLimited(db, key, now)) {
-    await audit(db, null, 'auth.rate_limited', null, { email }, ip);
+  const acctKey = `acct|${normLogin(email)}`;
+  if (await rateLimited(db, key, now) || await rateLimitedN(db, acctKey, now, 30)) {
+    await audit(db, null, 'auth.rate_limited', null, null, ip);
     return { ok: false, status: 429, error: 'Too many attempts. Try again in 15 minutes.' };
   }
   const user = await db.get('SELECT * FROM users WHERE email = ?', normLogin(email));
@@ -174,8 +178,8 @@ export async function login(db, email, password, ip, ua, now) {
   const stored = user ? user.password_hash : 'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
   const good = await verifyPassword(password || '', stored);
   if (!user || !good) {
-    await noteAttempt(db, key, false, now);
-    await audit(db, null, 'auth.login_failed', user ? user.id : null, { email }, ip);
+    await noteAttempt(db, key, false, now); await noteAttempt(db, acctKey, false, now);
+    await audit(db, null, 'auth.login_failed', user ? user.id : null, null, ip);
     return { ok: false, status: 401, error: 'Login or password is incorrect.' };
   }
   if (user.status !== 'active' && user.status !== 'pending') {
@@ -184,16 +188,18 @@ export async function login(db, email, password, ip, ua, now) {
     return { ok: false, status: 403, error: `Your account has been ${user.status}.`, accountStatus: user.status };
   }
   await noteAttempt(db, key, true, now);
-  const token = await createSession(db, user, ip, ua, now);
-  await db.run('UPDATE users SET last_login_at = ?, last_login_ip = ? WHERE id = ?', now, ip || null, user.id);
-  await audit(db, user, 'auth.login', user.id, null, ip);
-  return { ok: true, token, user };
+  return { ok: true, user };
+}
+export async function rateLimitedN(db, key, now, max) {
+  const rows = await db.all('SELECT ok FROM login_attempts WHERE key = ? AND at >= ?', key, now - ATTEMPT_WINDOW_MS);
+  return rows.filter(r => !r.ok).length >= max;
 }
 
-export async function changePassword(db, user, current, next, ip, now) {
+export async function changePassword(db, user, current, next, ip, now, problemsFn) {
   const ok = await verifyPassword(current || '', user.password_hash);
   if (!ok) return { ok: false, status: 400, error: 'Current password is incorrect.' };
-  const problems = passwordProblems(next);
+  if (current === next) return { ok: false, status: 400, error: 'Choose a password different from your current one.' };
+  const problems = problemsFn ? await problemsFn(next) : passwordProblems(next);
   if (problems.length) return { ok: false, status: 400,
     error: `New password needs ${problems.join(', ')}.` };
   await db.run('UPDATE users SET password_hash = ?, must_change_pw = 0, pw_changed_at = ? WHERE id = ?',

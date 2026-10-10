@@ -91,6 +91,7 @@
   function reviewCard(root) {
     const S = H().S;
     const sch = Review.reviewSchedule(S, Date.now()); if (!sch) return;
+    if (S.prefs && S.prefs.reviewReminder === false && sch.status !== 'done') return;   // turned off in Settings
     const c = el('div', 'card');
     const draft = (S.reviews || []).find(r => r.periodEnd === sch.periodEnd && r.status === 'draft');
     if (sch.status === 'due' || sch.status === 'overdue') {

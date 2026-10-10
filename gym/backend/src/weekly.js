@@ -1,8 +1,9 @@
 /* Weekly submissions: a member sends their weekly report to their assigned
    coach, who approves it or asks for changes. */
-import { json, err } from './http.js';
+import { json, err, readBody } from './http.js';
 import { audit } from './auth.js';
-import { newId } from './crypto.js';
+import { newId, sealText, openText } from './crypto.js';
+import { sharingAllowed, healthConsentWithdrawn } from './account.js';
 import { can, isReviewer, mayAccessUserData } from './rbac.js';
 
 const MAX_REPORT_BYTES = 60 * 1024;
@@ -10,9 +11,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OPEN = ['submitted', 'changes_requested'];
 const STATUSES = ['submitted', 'approved', 'changes_requested', 'withdrawn'];
 
-const shape = (r, withMember) => {
+const shape = async (r, withMember, env) => {
   let report = null;
-  try { report = JSON.parse(r.report_json); } catch (e) { report = null; }
+  try { report = JSON.parse(await openText(env, r.report_json)); } catch (e) { report = null; }
   const o = { id: r.id, userId: r.user_id, weekStart: r.week_start, report, planVersionId: r.plan_version_id,
     status: r.status, coachId: r.coach_id, coachNote: r.coach_note, createdAt: r.created_at,
     decidedAt: r.decided_at, updatedAt: r.updated_at };
@@ -23,6 +24,8 @@ const shape = (r, withMember) => {
 export async function createSubmission(rc, user) {
   const { db, now, ip } = rc;
   if (!can(user, 'reviews')) return err(403, 'You do not have access to reviews.');
+  if (await healthConsentWithdrawn(db, user.id)) return err(403, 'You have withdrawn consent to use your health information.', { code: 'health_consent_withdrawn' });
+  if (!(await sharingAllowed(db, user.id))) return err(409, 'Sharing with a reviewer is turned off in your settings.', { code: 'sharing_off' });
   let b;
   try {
     const text = await rc.req.text();
@@ -34,8 +37,9 @@ export async function createSubmission(rc, user) {
     return err(400, 'weekStart must be a date in YYYY-MM-DD form.');
   }
   if (!b.report || typeof b.report !== 'object' || Array.isArray(b.report)) return err(400, 'A report object is required.');
-  const reportJson = JSON.stringify(b.report);
-  if (new TextEncoder().encode(reportJson).length > MAX_REPORT_BYTES) return err(400, 'The report is too large.');
+  const plainJson = JSON.stringify(b.report);
+  if (new TextEncoder().encode(plainJson).length > MAX_REPORT_BYTES) return err(400, 'The report is too large.');
+  const reportJson = await sealText(rc.env, plainJson);
   if (b.planVersionId != null && (typeof b.planVersionId !== 'string' || b.planVersionId.length > 80)) {
     return err(400, 'planVersionId must be text of up to 80 characters.');
   }
@@ -90,13 +94,13 @@ export async function listSubmissions(rc, user) {
       await audit(db, user, 'weekly.read_member_reports', null,
         { ids: out.map(r => r.id), members: [...new Set(out.map(r => r.user_id))] }, ip);
     }
-    return json({ submissions: out.map(r => shape(r, true)) });
+    return json({ submissions: await Promise.all(out.map(r => shape(r, true, rc.env))) });
   }
   if (!can(user, 'reviews')) return err(403, 'You do not have access to reviews.');
   const rows = await db.all(
     `SELECT * FROM weekly_submissions WHERE user_id = ? ${status ? 'AND status = ?' : ''} ORDER BY week_start DESC, updated_at DESC`,
     ...(status ? [user.id, status] : [user.id]));
-  return json({ submissions: rows.map(r => shape(r, false)) });
+  return json({ submissions: await Promise.all(rows.map(r => shape(r, false, rc.env))) });
 }
 
 export async function decideSubmission(rc, user, id) {
@@ -104,7 +108,7 @@ export async function decideSubmission(rc, user, id) {
   const sub = await db.get('SELECT * FROM weekly_submissions WHERE id = ?', id);
   if (!sub) return err(404, 'No such submission.');
   let b = {};
-  try { b = await rc.req.json(); } catch (e) { b = {}; }
+  b = await readBody(rc.req);
   if (!b || typeof b !== 'object') b = {};
   const action = b.action;
   const note = typeof b.note === 'string' ? b.note.trim().slice(0, 2000) : '';

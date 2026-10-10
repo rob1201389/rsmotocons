@@ -1,0 +1,15 @@
+# Synthetic passwords and tokens in test files, already in git history.
+# Current lines carry a gitleaks:allow marker instead.
+fe15d07b8a3eb8af15d1eb56712beadc6f8f36d0:gym/backend/test/signup.test.js:generic-api-key:102
+b5b585dc985bf045f9ab0bec51a892a49a00ae8b:gym/backend/test/api.test.js:generic-api-key:142
+cf54da6de55cac9b5334880f0cebec4005673756:gym/backend/test/api.test.js:generic-api-key:142
+f71facac220b315881dbc5b41546eea5d2e60d82:gym/docs/authtest.js:generic-api-key:37
+fe15d07b8a3eb8af15d1eb56712beadc6f8f36d0:gym/test/auth.ui.test.js:generic-api-key:451
+fe15d07b8a3eb8af15d1eb56712beadc6f8f36d0:gym/test/auth.ui.test.js:generic-api-key:699
+fe15d07b8a3eb8af15d1eb56712beadc6f8f36d0:gym/test/auth.ui.test.js:generic-api-key:1163
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:147
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:157
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:168
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:186
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:377
+686f116d4d7cf1a09ae82ecb32b257dcbf11e8ad:gym/backend/test/api.test.js:generic-api-key:380

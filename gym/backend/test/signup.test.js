@@ -12,7 +12,7 @@ const adminU = await app.makeUser(owner, 'admin@example.test', 'admin');
 const admin = adminU.c;
 
 let n = 0;
-const body = (over = {}) => Object.assign({ name: 'Sam Member', email: `sam${++n}@example.test`, password: GOOD_PW, website: '' }, over);
+const body = (over = {}) => Object.assign({ name: 'Sam Member', email: `sam${++n}@example.test`, password: GOOD_PW, website: '', privacyNoticeVersion: '2026-10-11.1', healthConsent: true }, over);
 const lastMail = to => [...outbox].reverse().find(m => m.to === to);
 const tokenFrom = (to, kind) => { const m = lastMail(to); return m && (m.text.match(new RegExp('\\?' + kind + '=([^\\s"&]+)')) || [])[1]; };
 const audits = () => db.all('SELECT * FROM audit_log').map(r => r.action);
@@ -61,7 +61,8 @@ await t('validation failures are 400 and create nothing', async () => {
   const cases = [
     body({ name: 'A' }), body({ name: 'x'.repeat(81) }), body({ name: '' }), body({ name: 7 }),
     body({ email: 'not-an-email' }), body({ email: 'a@b' }), body({ email: 'x'.repeat(115) + '@e.test' }), body({ email: null }),
-    body({ password: 'short1A' }), body({ password: 'alllowercase1234' }), body({ password: 'NoDigitsHere!!!!' }), body({ password: null }),
+    body({ password: 'short1A' }), body({ password: 'password1234' }), body({ password: 'Rsmotocons12' }), body({ password: null }),
+    body({ privacyNoticeVersion: '' }), body({ healthConsent: false }), body({ healthConsent: 'yes' }),
     body({ password: 'Aa1' + 'x'.repeat(300) }), {}
   ];
   for (const c of cases) { const r = await client().post('/api/auth/signup', c); eq(r.status, 400, JSON.stringify(c).slice(0, 60)); }
@@ -99,7 +100,7 @@ await t('duplicate with an existing account: same shape, no leak, no new rows, n
 await t('duplicate pending request: generic 200, one row only, verification re-sent', async () => {
   const first = await newSignup();
   const mails = outbox.length;
-  const r = await client().post('/api/auth/signup', body({ email: first.b.email.toUpperCase(), password: 'Other-Pass-9876' }));
+  const r = await client().post('/api/auth/signup', body({ email: first.b.email.toUpperCase(), password: 'Other-Pass-9876' })); // gitleaks:allow (synthetic test credential)
   eq(r.status, 200); eq(r.data, { ok: true, status: 'pending_verification', emailSent: true });
   eq(rows(first.b.email), 1); eq(outbox.length, mails + 1);
   eq(db.get('SELECT COUNT(*) AS n FROM users WHERE email = ?', first.b.email).n, 1);
@@ -269,9 +270,10 @@ await t('approval activates the account, applies role and permissions, and the o
   eq(u.status, 'active'); eq(u.role, 'coach'); ok(u.approved_at); eq(u.approved_by, adminU.id);
   eq(JSON.parse(u.permissions), { nutrition: true, reviews: false });
   const me = await s.c.fetch('/api/auth/me');
-  eq(me.data.user.accountState, 'active'); eq(me.data.user.permissions.nutrition, true); eq(me.data.user.permissions.reviews, false);
+  eq(me.data.user.accountState, 'active'); eq(me.data.user.permissions.nutrition, true);
+  eq(me.data.user.permissions.reviews, true, 'weekly reviews are always on');
   eq((await s.c.fetch('/api/state')).status, 200);
-  eq((await s.c.fetch('/api/reviews')).status, 403, 'a revoked feature must stay revoked');
+  eq((await s.c.fetch('/api/reviews')).status, 200, 'reviews stay available whatever the override');
   const sr = db.get('SELECT * FROM signup_requests WHERE id = ?', s.sr.id);
   eq(sr.status, 'approved'); eq(sr.decided_by, adminU.id); eq(sr.decision_note, 'welcome');
 });

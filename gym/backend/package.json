@@ -1,1 +1,1 @@
-{"name":"recomp-backend","type":"module","private":true,"scripts":{"test":"node test/api.test.js && node test/signup.test.js && node test/ai.test.js && node test/weekly.test.js"}}
+{"name": "recomp-backend", "type": "module", "private": true, "scripts": {"test": "node test/api.test.js && node test/signup.test.js && node test/ai.test.js && node test/weekly.test.js && node test/security.test.js"}}

@@ -34,7 +34,7 @@ let ownerCk = (await raw('/api/auth/login', { method: 'POST',
 await raw('/api/auth/password', { method: 'POST',
   body: { current: OWNER_PW, next: 'Owner-Live-Passphrase-2' } }, ownerCk);
 ownerCk = (await raw('/api/auth/login', { method: 'POST',
-  body: { email: 'owner@test.local', password: 'Owner-Live-Passphrase-2' } })).cookie;
+  body: { email: 'owner@test.local', password: 'Owner-Live-Passphrase-2' } })).cookie; // gitleaks:allow (synthetic test credential)
 const mk = async (email, pw, role, perms) => (await raw('/api/admin/users', { method: 'POST',
   body: { email, password: pw, role, permissions: perms } }, ownerCk)).data.id;
 const ALICE = await mk('alice@test.local', 'Alice-Temp-Passphrase-1', 'member');

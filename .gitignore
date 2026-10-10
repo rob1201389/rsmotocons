@@ -2,3 +2,7 @@
 .wrangler/
 node_modules/
 gym/test/node_modules
+# database exports and local databases hold personal data
+recomp-export*.sql
+*.sqlite
+*.sqlite-*
