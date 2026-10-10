@@ -317,11 +317,7 @@ function startSession(day, checkin) {
     const entry = newEntry(ex.id, ex.id);
     const d = decideForEx(ex, checkin);
     entry.decision = d;
-    const p = d.prescription;
-    const n = p ? p.sets : ex.sets;
-    for (let i = 0; i < n; i++) {
-      entry.sets.push(newSet(p ? { weight: p.load, reps: p.repsHigh } : { weight: null, reps: ex.hi }));
-    }
+    seedSets(entry, ex, d);
     sess.entries.push(entry);
   });
   if (S.deferred && S.deferred[day] && !plan.shortened) delete S.deferred[day];
@@ -332,6 +328,50 @@ function startSession(day, checkin) {
   persist();
   go('train');
   say(`${dayName(day)} started with ${sess.entries.length} exercises`);
+}
+/* Start the session a plan slot describes. The roster, set counts and any
+   agreed changes come from the saved plan; loads come from double progression. */
+function startSlot(slotId, checkin) {
+  const today = todayISO();
+  Plan.reconcile(S, today);
+  const b = Plan.buildSession(S, slotId, checkin, today);
+  if (!b.ok) { toast(b.problems[0] || 'That session could not be started', 'warn'); return null; }
+  const sess = b.session; sess.checkin = checkin || null;
+  closeDeloadIfDue(S, today);
+  S.sessions.push(sess);
+  live.session = sess; S._liveId = sess.id;
+  persist(); go('train');
+  say(`${sess.dayName || 'Workout'} started with ${sess.entries.length} exercises`);
+  return sess;
+}
+/* A session that is not in the plan: an optional extra, or a replacement for a planned one. */
+function startAdHoc(sess) {
+  S.sessions.push(sess); live.session = sess; S._liveId = sess.id;
+  persist(); go('train'); say(`${sess.dayName || 'Workout'} started`);
+  return sess;
+}
+function sessionRatio(sess) {
+  let planned = 0, done = 0;
+  (sess.entries || []).forEach(e => (e.sets || []).forEach(st => {
+    if (st.warmup || st.role === 'backoff') return;
+    planned++; if (st.status === 'confirmed' || st.status === 'edited') done++;
+  }));
+  return planned ? Math.min(1, done / planned) : 0;
+}
+/* Planned sets come from the prescription: each set gets ITS OWN target, and
+   back-off sets (if configured) follow as a separate role. Nothing here is
+   performance; every set stays pending until the user acts on it. */
+function seedSets(entry, ex, d) {
+  entry.sets = [];
+  const p = d.prescription;
+  const n = p ? p.sets : ex.sets;
+  for (let i = 0; i < n; i++) {
+    const t = p && p.setTargets && p.setTargets[i] != null ? p.setTargets[i] : (p ? p.repsHigh : Math.round((ex.lo + ex.hi) / 2));
+    entry.sets.push(newSet({ weight: p ? p.load : null, reps: t }));
+  }
+  if (p && p.backoff) for (let i = 0; i < p.backoff.sets; i++) {
+    entry.sets.push(newSet({ weight: p.backoff.load, reps: p.backoff.reps, role: 'backoff' }));
+  }
 }
 function decideForEx(ex, checkin) {
   S._exIndex = EX_INDEX;
@@ -348,10 +388,13 @@ function currentSession() {
 }
 function finishSession() {
   const sess = currentSession(); if (!sess) return;
-  const performed = sess.entries.reduce((a, e) => a + workingSets(e).length, 0);
+  if (window.MoveUI) MoveUI.finaliseBlocks(sess);
+  const performed = sess.entries.reduce((a, e) => a + workingSets(e).length, 0) + (sess.blocks || []).filter(b => b.done).length;
   if (!performed) { toast('Nothing logged — session discarded', 'warn'); abandonSession(true); return; }
   sess.status = 'completed'; sess.endedAt = Date.now();
   recomputeBests(S, EX_INDEX);
+  if (sess.slotId) Plan.completeSlot(S, sess.slotId, sess, sessionRatio(sess));
+  else if (sess.extra) Plan.registerExtra(S, { date: sess.date, workoutId: sess.workoutId || null, replacesSlotId: sess.replacesSlotId || null, sessionId: sess.id, impact: sess.extraImpact || null });
   live.session = null; delete S._liveId;
   closeDeloadIfDue(S, todayISO());
   persist();
@@ -376,10 +419,15 @@ function abandonSession(quiet) {
 }
 
 /* ============================================================== render === */
-const TITLES = { today:'Today', train:'Train', progress:'Progress', library:'Library', profile:'Profile' };
+const TITLES = { today:'Today', plan:'My plan', workouts:'Workouts', stretch:'Stretch', recovery:'Recovery', more:'More',
+                 train:'Workout', nutrition:'Nutrition', progress:'Progress', library:'Exercises', profile:'Profile' };
+const ALL_TABS = ['today','plan','workouts','stretch','recovery','more','train','nutrition','progress','library','profile'];
+/* Phone bottom bar shows five items; the rest sit under More. On wide screens
+   every section is in the side rail. A section highlights the item that owns it. */
+const NAV_OWNER = { train:'today', recovery:'more', nutrition:'more', progress:'more', library:'more', profile:'more' };
 let tab = 'today';
-const TAB_FEATURE = { today:'training', train:'training', progress:'progress',
-                      library:'library', profile:null };
+const TAB_FEATURE = { today:'training', plan:'training', workouts:'training', stretch:'training', recovery:'training', more:null,
+                      train:'training', nutrition:'nutrition', progress:'progress', library:'library', profile:null };
 function tabAllowed(t) {
   const f = TAB_FEATURE[t];
   if (!f) return true;
@@ -388,18 +436,13 @@ function tabAllowed(t) {
 }
 function applyPermissions() {
   if (!window.AUTH || !AUTH.user()) return;
-  ['today','train','progress','library','profile'].forEach(t => {
+  ALL_TABS.forEach(t => {
     const b = document.querySelector(`[data-tab="${t}"]`);
     if (b) b.hidden = !tabAllowed(t);
   });
-  const fuel = $('#fuelCard');
-  if (fuel) {
-    const ok = AUTH.can('nutrition');
-    const section = fuel.previousElementSibling;
-    fuel.hidden = !ok; if (section && section.tagName === 'H2') section.hidden = !ok;
-  }
+  if (window.Views) Views.afterPermissions();
   if (!tabAllowed(tab)) {
-    const first = ['today','train','progress','library','profile'].find(tabAllowed);
+    const first = ALL_TABS.find(tabAllowed);
     if (first) go(first);
   }
 }
@@ -407,10 +450,11 @@ function applyPermissions() {
 function go(t) {
   if (!tabAllowed(t)) { toast('That section is not enabled for your account', 'warn'); return; }
   tab = t;
-  ['today','train','progress','library','profile'].forEach(x => {
-    document.getElementById('p-' + x).hidden = x !== t;
+  const owner = NAV_OWNER[t] || t;
+  ALL_TABS.forEach(x => {
+    const panel = document.getElementById('p-' + x); if (panel) panel.hidden = x !== t;
     const b = document.querySelector(`[data-tab="${x}"]`);
-    b.setAttribute('aria-selected', String(x === t));
+    if (b) b.setAttribute('aria-selected', String(window.matchMedia && matchMedia('(min-width: 900px)').matches ? x === t : x === owner));
   });
   $('#screenTitle').textContent = TITLES[t];
   window.scrollTo(0, 0);
@@ -425,29 +469,63 @@ function renderAll() {
   $('#storeBadge').className = 'badge' + (storageLabel() === 'NOT SAVING' ? ' live' : '');
   if (tab === 'today') renderToday();
   if (tab === 'train') renderTrain();
+  if (tab === 'nutrition') renderFuel();
   if (tab === 'progress') renderProgress();
   if (tab === 'library') renderLibrary();
   if (tab === 'profile') renderProfile();
+  if (window.Views && tab !== 'today' && Views.has(tab)) Views.render(tab, document.getElementById('p-' + tab));
 }
 
 /* ------------------------------------------------------------- TODAY ---- */
 function renderToday() {
   const notices = $('#todayNotices'); notices.innerHTML = '';
   const sess = currentSession();
-  const day = sess ? sess.dayId : nextDay();
+  const today = todayISO();
+  const planned = Plan.hasPlan(S);
+  let slots = [], slot = null;
+  if (planned) { Plan.reconcile(S, today); slots = Plan.slotsOn(S, today); slot = slots.find(x => x.kind === 'training' && x.status === 'planned') || null; }
+  const day = sess ? sess.dayId : (slot ? 1 : nextDay());
   const d = new Date();
   $('#todayDate').textContent = d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
-  $('#todayTitle').textContent = sess ? `${dayName(day)} in progress` : dayName(day);
-  $('#todaySub').textContent = sess
-    ? `${sess.entries.filter(e => workingSets(e).length).length} of ${sess.entries.length} exercises logged`
-    : dayFocus(day);
-  const btn = $('#startBtn');
-  btn.textContent = sess ? 'Resume workout' : 'Start workout';
-  btn.onclick = () => {
-    if (sess) { go('train'); return; }
-    openCheckin(day);            // tap 1 = Start, tap 2 = Start in the sheet
-  };
-  $('#readinessBtn').onclick = () => openCheckin(day, true);
+  const btn = $('#startBtn'), rb = $('#readinessBtn');
+  rb.hidden = false;
+  rb.onclick = () => openCheckin(day, true);
+  if (sess) {
+    $('#todayTitle').textContent = `${sess.dayName || dayName(day)} in progress`;
+    $('#todaySub').textContent = `${sess.entries.filter(e => workingSets(e).length).length} of ${sess.entries.length} exercises logged`;
+    btn.hidden = false; btn.textContent = 'Resume workout'; btn.onclick = () => go('train');
+  } else if (planned) {
+    const done = slots.find(x => x.kind === 'training' && (x.status === 'completed' || x.status === 'partial'));
+    const other = slots.find(x => x.kind !== 'training' && x.status !== 'skipped');
+    if (slot) {
+      const r = Plan.sessionRoster(S, slot);
+      $('#todayTitle').textContent = r.dayName;
+      $('#todaySub').textContent = `About ${Math.round(r.minutes)} minutes · ${r.items.length} exercises · ` + r.items.slice(0, 3).map(i => (EX_INDEX[i.id] || {}).short).filter(Boolean).join(', ');
+      btn.hidden = false; btn.textContent = 'Start workout'; btn.onclick = () => openCheckin(day, false, slot.id);
+    } else if (done) {
+      $('#todayTitle').textContent = done.status === 'completed' ? 'Training done for today' : 'Part of today\'s session done';
+      $('#todaySub').textContent = `${done.label} is logged. More is optional, and extra work is counted in this week's load.`;
+      btn.hidden = false; btn.textContent = 'See optional sessions'; btn.onclick = () => go('workouts');
+    } else if (other) {
+      const kindWord = { rest: 'Rest day', recovery: 'Recovery day', stretch: 'Stretch day', conditioning: 'Conditioning' }[other.kind] || other.label;
+      $('#todayTitle').textContent = other.kind === 'conditioning' ? other.label : kindWord;
+      $('#todaySub').textContent = other.kind === 'rest' ? 'Nothing planned. Rest is part of the plan, and a rest day kept is a success.'
+        : other.kind === 'recovery' ? 'Easy movement and mobility. Recovery days are what make the hard days work.'
+        : other.kind === 'stretch' ? `A stretch session, about ${other.minutes || 15} minutes.` : `About ${other.minutes || 30} minutes of conditioning.`;
+      btn.hidden = false;
+      btn.textContent = other.kind === 'conditioning' ? 'Choose a conditioning session' : other.kind === 'stretch' ? 'Open stretch routines' : 'Open recovery';
+      btn.onclick = () => go(other.kind === 'conditioning' ? 'workouts' : other.kind === 'stretch' ? 'stretch' : 'recovery');
+    } else {
+      $('#todayTitle').textContent = 'Nothing planned today';
+      $('#todaySub').textContent = 'See My plan for the week.';
+      btn.hidden = false; btn.textContent = 'Open my plan'; btn.onclick = () => go('plan');
+    }
+  } else {
+    $('#todayTitle').textContent = dayName(day);
+    $('#todaySub').textContent = dayFocus(day);
+    btn.hidden = false; btn.textContent = 'Start workout';
+    btn.onclick = () => openCheckin(day);            // tap 1 = Start, tap 2 = Start in the sheet
+  }
 
   const dl = proposeDeload(S, todayISO());
   if (dl && !S._deloadDismissed) {
@@ -471,9 +549,23 @@ function renderToday() {
     notices.appendChild(b);
   }
 
-  // week strip
+  // week strip: the planned week when there is a plan, otherwise Monday to Sunday
   const strip = $('#weekStrip'); strip.innerHTML = '';
-  const today = todayISO();
+  if (planned) {
+    const wk = Plan.ensureWeek(S, today);
+    const sym = { training: 'T', conditioning: 'C', stretch: 'S', recovery: 'R', rest: '–' };
+    wk.slots.forEach(sl => {
+      const dn = ['M','T','W','T','F','S','S'][Plan.isoDow(sl.date) - 1];
+      const fin = sl.status === 'completed' || sl.status === 'partial';
+      const cell = el('div', (fin ? 'done ' : '') + (sl.date === today ? 'today' : '') + (sl.status === 'missed' || sl.status === 'skipped' ? ' miss' : ''));
+      cell.innerHTML = `<span>${dn}</span><span>${sym[sl.kind] || '·'}</span>`;
+      cell.setAttribute('aria-label', `${sl.date}: ${sl.label}, ${sl.status}`);
+      strip.appendChild(cell);
+    });
+    const ts = wk.slots.filter(x => x.kind === 'training');
+    const doneN = ts.filter(x => x.status === 'completed').length, part = ts.filter(x => x.status === 'partial').length;
+    $('#weekSummary').textContent = `${doneN} of ${ts.length} planned sessions done this week${part ? `, ${part} partly` : ''}. T training, C conditioning, S stretch, R recovery.`;
+  } else {
   const monday = addDays(today, -((new Date().getDay() + 6) % 7));
   let doneCount = 0;
   for (let i = 0; i < 7; i++) {
@@ -486,9 +578,10 @@ function renderToday() {
     strip.appendChild(cell);
   }
   $('#weekSummary').textContent = `${doneCount} of ${S.profile.trainingDaysPerWeek} planned days done this week.`;
+  }
 
   $('#insight').innerHTML = buildInsight();
-  renderFuel();
+  if (window.Views) Views.render('today', $('#todayExtra'));
 }
 
 function buildInsight() {
@@ -577,7 +670,17 @@ function renderTrain() {
     notices.appendChild(b);
   });
 
+  if (sess.slotId && window.TodayUI) {
+    const f = Plan.findSlot(S, sess.slotId);
+    if (f && f.slot.status === 'planned') {
+      const ad = el('div', 'opts vwrap'); ad.setAttribute('aria-label', 'Change this session');
+      [['less_time', 'I have less time'], ['equipment', 'Equipment unavailable'], ['feel_different', 'I feel different today']].forEach(([k, l]) => {
+        const b = el('button', null, l); b.type = 'button'; b.onclick = () => TodayUI.adaptFlow(sess.slotId, k); ad.appendChild(b); });
+      list.appendChild(ad);
+    }
+  }
   sess.entries.forEach((entry, idx) => list.appendChild(exCard(sess, entry, idx)));
+  if (window.MoveUI) MoveUI.trainExtras(sess, list);
 }
 
 function exCard(sess, entry, idx) {
@@ -594,7 +697,7 @@ function exCard(sess, entry, idx) {
   const tgt = p ? prescriptionText(p, ex) : 'Choose your load';
   nm.innerHTML = `<b>${esc(ex.name)}</b><span>${esc(tgt)}</span>`;
   hd.appendChild(nm);
-  if (d) hd.appendChild(el('span','pill ' + pillKind(d.action), actionLabel(d.action)));
+  if (d) hd.appendChild(el('span','pill ' + decisionKind(d), decisionLabel(d)));
   hd.appendChild(el('span','chev','▶'));
   hd.onclick = () => { openEx = (openEx === entry.variantId) ? null : entry.variantId; renderTrain(); };
   card.appendChild(hd);
@@ -622,11 +725,8 @@ function exCard(sess, entry, idx) {
           if (!confirm('Only clear this if the movement is genuinely pain-free, or a clinician has cleared you. Clear it?')) return;
           resolvePainConcern(S, c.id, todayISO(), 'cleared by user in app');
           entry.decision = decideForEx(ex, sess.checkin);
-          entry.sets = [];
-          const p2 = entry.decision.prescription;
-          for (let k = 0; k < (p2 ? p2.sets : ex.sets); k++) {
-            entry.sets.push(newSet(p2 ? { weight: p2.load, reps: p2.repsHigh } : { weight: null, reps: ex.hi }));
-          }
+          delete entry.progressionChoice;
+          seedSets(entry, ex, entry.decision);
           persist(); renderTrain(); toast('Concern cleared');
         }
       };
@@ -646,6 +746,9 @@ function exCard(sess, entry, idx) {
     <div class="target"><span class="k">Target</span><span class="v">${p && p.load != null ? p.load + (ex.modality==='assisted'?' asst':'') : '—'}</span></div>
     <div><span class="k">Actual</span><span class="v">${perf.length ? esc(actualSummary(perf, ex)) : '—'}</span></div>`;
   body.appendChild(pta);
+
+  // progression: current load and range, last time, today's per-set targets, what is still required
+  if (d && d.progression) body.appendChild(progressPanel(sess, entry, ex, d));
 
   // explanation
   if (d && d.explain) {
@@ -685,7 +788,9 @@ function exCard(sess, entry, idx) {
 function setRow(sess, entry, ex, set, i) {
   const row = el('div','setrow' + (set.status === 'pending' ? ' suggested' : ''));
   const unit = ex.unit || (MODALITY[ex.modality] || {}).unit || 'reps';
-  row.appendChild(el('div','sn', String(i + 1)));
+  const sn = el('div','sn' + (set.role === 'backoff' ? ' bo' : ''), set.role === 'backoff' ? 'BO' : String(i + 1));
+  if (set.role === 'backoff') sn.title = 'Back-off set: a deliberate lighter set. It does not count towards the working load.';
+  row.appendChild(sn);
 
   const wf = el('div','fld');
   wf.innerHTML = `<label for="w${entry.variantId}${i}">${ex.modality === 'assisted' ? 'asst' : 'kg'}</label>`;
@@ -753,6 +858,218 @@ function actualSummary(sets, ex) {
   const reps = sets.filter(s => s.actualWeight === w).map(s => s.actualReps).join(',');
   return `${w ?? 0}×${reps || '—'}`;
 }
+function decisionLabel(d) {
+  const st = d && d.progression && d.progression.status;
+  if (st === 'building') return 'Build';
+  if (st === 'blocked') return 'Hold';
+  if (st === 'manual') return 'Manual';
+  return actionLabel(d.action);
+}
+function decisionKind(d) {
+  const st = d && d.progression && d.progression.status;
+  if (st === 'building') return 'go';
+  return pillKind(d.action);
+}
+
+/* ------------------------------------------------ progression panel ---- */
+function progressPanel(sess, entry, ex, d) {
+  const info = d.progression;
+  const box = el('div', 'prog');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'Progression for ' + ex.name);
+  const performed = workingSets(entry).length > 0;
+  let h = `<div class="p-head">${esc(info.header)}</div>`;
+  h += `<div class="p-line">${esc(info.lastText || '')}</div>`;
+  if (info.todayText) h += `<div class="p-line"><b>${esc(info.todayText)}</b></div>`;
+  if (info.method === 'double' && info.setsAtTop && info.status !== 'paused') {
+    const { have, need } = info.setsAtTop;
+    let dots = '';
+    for (let i = 0; i < need; i++) dots += `<i class="${i < have ? 'on' : ''}"></i>`;
+    h += `<div class="meter" role="img" aria-label="${have} of ${need} sets reached ${info.repMax} last time">${dots}</div>
+          <div class="meter-l">Last session: ${have} of ${need} sets at ${info.repMax}` +
+         (info.qualifying.need > 1 ? ` · qualifying sessions ${info.qualifying.have} of ${info.qualifying.need}` : '') + `</div>`;
+  }
+  if (info.requirements && info.requirements.length && info.status !== 'earned') {
+    h += '<ul class="req" aria-label="What is still required for the next weight increase">' +
+      info.requirements.map(r => {
+        const k = r.met === true ? 'met' : r.met === false ? 'unmet' : 'unknown';
+        const ic = r.met === true ? '✓' : r.met === false ? '✕' : '?';
+        const sr = r.met === true ? 'done' : r.met === false ? 'not yet' : 'unknown';
+        return `<li class="${k}"><span class="ic" aria-hidden="true">${ic}</span><span>${esc(r.text)} <span class="sr-only">(${sr})</span></span></li>`;
+      }).join('') + '</ul>';
+  }
+  if (info.nextText) h += `<div class="p-next">${esc(info.nextText)}</div>`;
+  box.innerHTML = h;
+
+  const ch = entry.progressionChoice;
+  if (ch) {
+    const rec = ch.recommended;
+    const what = ch.chosen === 'accepted' ? 'You accepted the recommendation.'
+      : ch.chosen === 'held' ? `You held the load at ${ch.applied.load != null ? ch.applied.load + ' kg' : 'its previous value'}.`
+      : `You edited today's numbers: ${ch.applied.load} kg, ${ch.applied.setTargets.join(' / ')}.`;
+    box.appendChild(el('div', 'choice',
+      `${esc(what)} The app recommended ${rec.load != null ? esc(rec.load) + ' kg' : 'no load'}${rec.setTargets && rec.setTargets.length ? ' · ' + esc(rec.setTargets.join(' / ')) : ''}. ` +
+      `Your choice is recorded separately.`));
+  }
+  if (!d.paused && !performed) {
+    const bar = el('div', 'mediabar');
+    if (info.status === 'earned' && !ch) {
+      const prev = info.lastLoad;
+      box.appendChild(el('div', 'p-prev',
+        `<div class="t">Weight increase earned: ${esc(info.header)}</div>
+         <div class="muted" style="font-size:.84rem;margin-top:2px">Accept it, hold at ${prev != null ? esc(prev) + ' kg' : 'the previous load'}, or enter your own numbers.</div>`));
+      const acc = el('button', 'btn sm primary', 'Accept');
+      acc.onclick = () => chooseProgression(entry, ex, 'accept');
+      const hold = el('button', 'btn sm', 'Hold' + (prev != null ? ' at ' + prev + ' kg' : ''));
+      hold.onclick = () => chooseProgression(entry, ex, 'hold');
+      bar.append(acc, hold);
+    }
+    const edit = el('button', 'btn sm ghost', 'Edit');
+    edit.onclick = () => openProgressionEdit(entry, ex);
+    bar.appendChild(edit);
+    box.appendChild(bar);
+  }
+  return box;
+}
+function chooseProgression(entry, ex, choice) {
+  const settings = resolveSettings(S, ex);
+  const before = JSON.parse(JSON.stringify({ sets: entry.sets, choice: entry.progressionChoice || null }));
+  const r = applyProgressionChoice(entry, choice, null, settings);
+  if (!r.ok) { toast(r.problems[0], 'warn'); return; }
+  pushUndo('progression ' + choice, () => {
+    entry.sets = before.sets;
+    if (before.choice) entry.progressionChoice = before.choice; else delete entry.progressionChoice;
+  });
+  persist(); renderTrain();
+  say(choice === 'accept' ? 'Recommendation accepted' : 'Held at the previous load');
+  toast(choice === 'accept' ? 'Accepted' : 'Held at the previous load', null, true);
+}
+let pgCtx = null;
+function openProgressionEdit(entry, ex) {
+  const d = entry.decision, p = d && d.prescription;
+  if (!p) { toast('Nothing to edit yet. Log the first sets to set a baseline.', 'warn'); return; }
+  const top = entry.sets.filter(x => !x.warmup && x.role !== 'backoff');
+  pgCtx = { entry, ex };
+  const cur = top[0] || {};
+  const b = $('#pgBody'); b.innerHTML = '';
+  const unit = ex.modality === 'assisted' ? 'Assistance (kg)' : 'Load (kg)';
+  b.innerHTML = `
+    <div class="fld2"><label for="pgLoad">${esc(unit)}</label>
+      <input id="pgLoad" type="number" step="0.25" inputmode="decimal" value="${cur.plannedWeight != null ? esc(cur.plannedWeight) : ''}"></div>
+    <div class="fld2"><label for="pgReps">Target per set, in order</label>
+      <input id="pgReps" type="text" inputmode="numeric" value="${esc(top.map(x => x.plannedReps).join(', '))}" placeholder="e.g. 9, 9, 8">
+      <div class="hint">One number for each set. Adding a set while raising the load is not allowed: change one, then the other next time.</div></div>
+    <div class="hint">The app recommended <b>${p.load != null ? esc(p.load) + ' kg' : 'no load'}</b>${p.setTargets ? ' · ' + esc(p.setTargets.join(' / ')) : ''}.</div>`;
+  $('#pgErr').innerHTML = '';
+  openSheet('pgSheet');
+}
+$('#pgSave').onclick = () => {
+  if (!pgCtx) return;
+  const { entry, ex } = pgCtx;
+  const load = parseFloat($('#pgLoad').value);
+  const targets = $('#pgReps').value.split(/[\s,;\/]+/).filter(Boolean).map(Number);
+  const settings = resolveSettings(S, ex);
+  const before = JSON.parse(JSON.stringify({ sets: entry.sets, choice: entry.progressionChoice || null }));
+  const r = applyProgressionChoice(entry, 'edit', { load, setTargets: targets }, settings);
+  const box = $('#pgErr');
+  if (!r.ok) {
+    box.innerHTML = `<div class="ps-errs"><b>Not saved</b><ul>${r.problems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    return;
+  }
+  pushUndo('progression edit', () => {
+    entry.sets = before.sets;
+    if (before.choice) entry.progressionChoice = before.choice; else delete entry.progressionChoice;
+  });
+  persist(); closeSheet('pgSheet'); renderTrain();
+  toast(r.warnings.length ? 'Saved as your change. ' + r.warnings[0] : 'Saved as your change', r.warnings.length ? 'warn' : null, true);
+};
+
+/* ------------------------------------------- per-exercise settings ----- */
+let psCtx = null;
+function openProgressionSettings(ex) {
+  const s = resolveSettings(S, ex);
+  psCtx = { ex };
+  const unit = (MODALITY[ex.modality] || {}).unit || 'reps';
+  const unitWord = unit === 's' ? 'seconds' : unit === 'm' ? 'metres' : 'reps';
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${String(v) === String(cur) ? ' selected' : ''}>${esc(l)}</option>`;
+  const b = $('#psBody');
+  b.innerHTML = `
+    <div class="fld2"><label for="psMethod">Progression method</label>
+      <select id="psMethod">${Object.keys(PROGRESSION_METHODS).map(k => opt(k, PROGRESSION_METHODS[k].label, s.method)).join('')}</select>
+      <div class="hint" id="psMethodHint"></div></div>
+    <div class="row2">
+      <div class="fld2"><label for="psSets">Working sets</label><input id="psSets" type="number" min="1" max="10" step="1" value="${esc(s.sets)}"></div>
+      <div class="fld2"><label for="psStep">Step per session (${esc(unitWord)})</label><input id="psStep" type="number" min="1" step="1" value="${esc(s.repStep)}"></div>
+    </div>
+    <div class="row2">
+      <div class="fld2"><label for="psMin">Minimum ${esc(unitWord)}</label><input id="psMin" type="number" min="1" step="1" value="${esc(s.repMin)}"></div>
+      <div class="fld2"><label for="psMax">Maximum ${esc(unitWord)}</label><input id="psMax" type="number" min="1" step="1" value="${esc(s.repMax)}"></div>
+    </div>
+    <div class="fld2"><label for="psInc">${ex.modality === 'assisted' ? 'Available assistance steps (kg)' : 'Available weight increases (kg)'}</label>
+      <input id="psInc" type="text" inputmode="decimal" value="${esc(s.increments.join(', '))}">
+      <div class="hint">What your equipment actually allows, comma separated, for example 1.25, 2.5, 5. The app only ever uses these and picks the smallest one that fits the limit.</div></div>
+    <div class="fld2"><label for="psJump">Progression limit (% of the load per step)</label>
+      <input id="psJump" type="number" min="0.5" max="25" step="0.5" value="${esc(s.maxJumpPct)}">
+      <div class="hint">If the smallest increase is bigger than this, the load holds and the app tells you why.</div></div>
+    <div class="row2">
+      <div class="fld2"><label for="psRir">Clean reps in reserve needed</label>
+        <select id="psRir">${[0,1,2,3,4].map(n => opt(n, n + (n === 4 ? '+' : ''), s.minReserve)).join('')}</select></div>
+      <div class="fld2"><label for="psEff">Highest acceptable effort</label>
+        <select id="psEff">${Object.keys(EFFORT_SCALE).map(k => opt(k, EFFORT_SCALE[k].label, s.maxEffort)).join('')}</select></div>
+    </div>
+    <div class="fld2"><label for="psQual">Qualifying sessions in a row before the load goes up</label>
+      <select id="psQual">${[1,2,3,4,5].map(n => opt(n, n === 1 ? '1 (the next session)' : n + ' in a row', s.qualifyingSessions)).join('')}</select></div>
+    <div class="row2">
+      <div class="fld2"><label for="psBoSets">Back-off sets (0 for none)</label>
+        <input id="psBoSets" type="number" min="0" max="4" step="1" value="${s.backoff ? esc(s.backoff.sets) : 0}"></div>
+      <div class="fld2"><label for="psBoPct">Back-off load (% of top)</label>
+        <input id="psBoPct" type="number" min="50" max="95" step="1" value="${s.backoff ? esc(s.backoff.pct) : 85}"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="psTech"${s.requireTechnique ? ' checked' : ''}><span>Require technique feedback before the load can go up</span></label>
+    <label class="chk"><input type="checkbox" id="psCap"${s.addLoadAtCap ? ' checked' : ''}><span>After the top of the range, add load automatically (reps, duration and distance methods)</span></label>
+    <label class="chk"><input type="checkbox" id="psStrict"${s.strictLimit ? ' checked' : ''}><span>Never exceed the progression limit, even for a carry with a fixed distance</span></label>`;
+  const hints = {
+    double: 'Hold the load and build reps set by set. When every working set reaches the top of the range with acceptable effort and technique, add one available increment and reset the reps.',
+    reps: 'Build reps. Bodyweight work: load is added after the top of the range only if the switch below is on.',
+    duration: 'Build seconds. Load is added after the top of the range only if the switch below is on.',
+    distance: 'Build distance, or move the load when the distance is fixed.',
+    manual: 'The app never changes the load. It shows what you did and you decide.'
+  };
+  const upd = () => { $('#psMethodHint').textContent = hints[$('#psMethod').value] || ''; };
+  $('#psMethod').onchange = upd; upd();
+  $('#psTitle').textContent = ex.short + ' · progression';
+  $('#psErr').innerHTML = '';
+  openSheet('psSheet');
+}
+$('#psSave').onclick = () => {
+  if (!psCtx) return;
+  const { ex } = psCtx;
+  const bo = parseInt($('#psBoSets').value, 10);
+  const raw = {
+    method: $('#psMethod').value, sets: $('#psSets').value, repStep: $('#psStep').value,
+    repMin: $('#psMin').value, repMax: $('#psMax').value, increments: $('#psInc').value,
+    maxJumpPct: $('#psJump').value, minReserve: $('#psRir').value, maxEffort: $('#psEff').value,
+    qualifyingSessions: $('#psQual').value,
+    backoff: bo > 0 ? { sets: bo, pct: $('#psBoPct').value } : null,
+    requireTechnique: $('#psTech').checked, addLoadAtCap: $('#psCap').checked, strictLimit: $('#psStrict').checked
+  };
+  const r = saveExerciseSettings(S, ex, raw, todayISO());
+  if (!r.ok) {
+    $('#psErr').innerHTML = `<div class="ps-errs"><b>Not saved</b><ul>${r.problems.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    return;
+  }
+  persist(); closeSheet('psSheet');
+  toast(r.restartedQualifying ? 'Saved. Qualifying sessions restart from today.' : 'Saved');
+  openDetail(ex); renderAll();
+};
+$('#psReset').onclick = () => {
+  if (!psCtx) return;
+  if (!confirm('Reset this exercise to the default progression settings? Logged sessions are not changed.')) return;
+  resetExerciseSettings(S, psCtx.ex);
+  persist(); closeSheet('psSheet'); toast('Reset to defaults');
+  openDetail(psCtx.ex); renderAll();
+};
+
 function pillKind(a) {
   if (a === 'progress') return 'go';
   if (a === 'reduce' || a === 'review') return 'down';
@@ -775,11 +1092,8 @@ function swapExercise(sess, entry, ex) {
   entry.substitutedFrom = entry.variantId;
   entry.variantId = nx.id; entry.exerciseId = nx.id;
   entry.decision = decideForEx(nx, sess.checkin);
-  entry.sets = [];
-  const p = entry.decision.prescription;
-  for (let k = 0; k < (p ? p.sets : nx.sets); k++) {
-    entry.sets.push(newSet(p ? { weight: p.load, reps: p.repsHigh } : { weight: null, reps: nx.hi }));
-  }
+  delete entry.progressionChoice;
+  seedSets(entry, nx, entry.decision);
   pushUndo('swap', () => Object.assign(entry, before));
   persist(); renderTrain();
   toast(`Swapped to ${nx.short}`, null, true);
@@ -900,8 +1214,8 @@ $('#painSave').onclick = () => {
 
 /* --------------------------------------------------------- CHECK-IN ----- */
 let ckCtx = null;
-function openCheckin(day, previewOnly) {
-  ckCtx = { day, previewOnly, draft: blankCheckin() };
+function openCheckin(day, previewOnly, slotId) {
+  ckCtx = { day, previewOnly, slotId: slotId || null, draft: blankCheckin() };
   const b = $('#ckBody'); b.innerHTML = '';
   b.appendChild(scaleGroup('Energy', 'energy', 'Flat', 'Fresh'));
   b.appendChild(scaleGroup('Sleep', 'sleep', 'Poor', 'Great'));
@@ -957,9 +1271,20 @@ $('#ckSave').onclick = () => {
   const ck = ckCtx.draft; ck.at = Date.now();
   closeSheet('ckSheet');
   if (ckCtx.previewOnly) { S.lastCheckin = ck; persist(); toast('Check-in saved'); renderAll(); return; }
+  if (ckCtx.slotId) { beginSlot(ckCtx.slotId, ck); return; }
   startSession(ckCtx.day, ck);
 };
-$('#ckSkip').onclick = () => { closeSheet('ckSheet'); if (!ckCtx.previewOnly) startSession(ckCtx.day, null); };
+$('#ckSkip').onclick = () => { closeSheet('ckSheet'); if (!ckCtx.previewOnly) { if (ckCtx.slotId) beginSlot(ckCtx.slotId, null); else startSession(ckCtx.day, null); } };
+/* If less time was chosen, show exactly what would be cut and let the user confirm before starting. */
+function beginSlot(slotId, ck) {
+  const f = Plan.findSlot(S, slotId);
+  const roster = f ? Plan.sessionRoster(S, f.slot) : null;
+  if (ck && ck.timeAvailableMin && roster && ck.timeAvailableMin < roster.minutes - 3 && window.Views) {
+    Views.openAdjust(slotId, 'less_time', { minutes: ck.timeAvailableMin }, () => startSlot(slotId, ck), () => startSlot(slotId, ck));
+    return;
+  }
+  startSlot(slotId, ck);
+}
 
 /* ------------------------------------------------------- COMPLETION ----- */
 function showCompletion(sess) {
@@ -991,6 +1316,11 @@ function showCompletion(sess) {
     <span class="eyebrow">Next session</span>
     ${rows.join('') || '<p class="muted">Nothing was logged.</p>'}
     <p class="dim" style="font-size:.8rem;margin-top:10px">Every line above comes from what you actually logged plus the feedback you gave. Change a set or the feedback and these change too.</p>`;
+  if (window.NotesUI) {
+    const nb = el('button', 'btn block', 'Add a training update'); nb.id = 'doneUpdateBtn'; nb.style.marginTop = '12px';
+    nb.onclick = () => { closeSheet('doneSheet'); NotesUI.compose({ key: 'session:' + sess.id, linked: { sessionId: sess.id, slotId: sess.slotId || null }, origin: 'workout' }); };
+    d.appendChild(nb);
+  }
   openSheet('doneSheet');
 }
 
@@ -1201,9 +1531,16 @@ function openDetail(ex) {
     <h4>Common mistakes</h4><ul>${ex.mistakes.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
     <h4>If you cannot do this one</h4><ul>${ex.alternatives.map(a =>
       `<li>${esc((EX_INDEX[a]||{}).name || a)}</li>`).join('')}</ul>
+    <h4>Progression</h4><ul>
+      <li><b>${esc(PROGRESSION_METHODS[d.progression.method].label)}</b> · ${esc(d.progression.sets)} × ${esc(d.progression.repMin)}–${esc(d.progression.repMax)}${resolveSettings(S, ex).source === 'custom' ? ' · customised' : ''}</li>
+      ${d.progression.nextText ? `<li>${esc(d.progression.nextText)}</li>` : ''}</ul>
     ${ex.progressionNote ? `<h4>How it progresses</h4><ul><li>${esc(ex.progressionNote)}</li></ul>` : ''}
     ${ex.prerequisite ? `<h4>Before this</h4><ul><li>${esc((EX_INDEX[ex.prerequisite]||{}).name)}</li></ul>` : ''}`;
   b.appendChild(g);
+  const setBtn = el('button', 'btn block', 'Progression settings for this exercise');
+  setBtn.style.marginTop = '12px';
+  setBtn.onclick = () => { closeSheet('detailSheet'); openProgressionSettings(ex); };
+  b.appendChild(setBtn);
   openSheet('detailSheet');
 }
 function openStretch(s) {
@@ -1283,6 +1620,10 @@ function renderProfile() {
   reset.onclick = () => { if (confirm('Erase all sessions, records and settings? This cannot be undone.')) {
     S = blankState(); persist(); renderAll(); toast('Everything erased','warn'); } };
   dt.appendChild(reset);
+
+  /* Administration: shown to administrators only (the server enforces it too). */
+  { const old = document.getElementById('profAdmin'); if (old) old.remove();
+    if (window.Admin && window.AUTH && Admin.available(AUTH.user())) $('#profPrefs').after(Admin.profileBlock()); }
 
   const as = $('#profAssume');
   as.innerHTML = `<p class="muted" style="font-size:.86rem;margin:0 0 10px">
@@ -1406,85 +1747,18 @@ $('#bwSave').onclick = () => {
    ========================================================================== */
 let AUTH_MODE = 'local';     // local | server | offline
 
+/* The gate is a public welcome page plus the sign-in dialog and the
+   account-status page. All of it lives in authui.js (AuthUI); this file only
+   decides when to show it and what happens once someone is signed in. The
+   views are: login, signup, setup, password, pending, blocked, welcome. */
 function showGate(view, opts) {
   opts = opts || {};
-  const gate = $('#authGate');
-  gate.hidden = false;
-  document.body.classList.add('locked');
-  $('#loginForm').hidden = view !== 'login';
-  $('#pwForm').hidden = view !== 'password';
-  $('#setupForm').hidden = view !== 'setup';
-  $('#authBlocked').hidden = view !== 'blocked';
-  $('#authHeading').textContent =
-    view === 'password' ? 'New password' : view === 'blocked' ? 'No access'
-    : view === 'setup' ? 'Set up your account' : 'Sign in';
-  $('#authSub').textContent =
-    view === 'password' ? 'This replaces the temporary password you were given.'
-    : view === 'setup' ? 'First time only. Enter your login and choose your own password.'
-    : view === 'blocked' ? ''
-    : 'Your training data is private to your account.';
-  if (view === 'blocked') $('#authBlockedMsg').textContent = opts.message || '';
-  $('#authFoot').textContent = opts.foot || '';
-  const focus = gate.querySelector('form:not([hidden]) input, #authBackBtn');
-  if (focus) setTimeout(() => focus.focus(), 80);
+  if (window.AuthUI) AuthUI.show(view, opts);
 }
 function hideGate() {
-  $('#authGate').hidden = true;
-  document.body.classList.remove('locked');
+  if (window.AuthUI) AuthUI.hide();
 }
-
-$('#loginForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = $('#loginBtn'), errEl = $('#loginError');
-  errEl.hidden = true; btn.disabled = true; btn.textContent = 'Signing in…';
-  try {
-    const r = await AUTH.login($('#loginEmail').value.trim(), $('#loginPassword').value);
-    if (!r.ok) {
-      errEl.textContent = r.error; errEl.hidden = false;
-      if (r.accountStatus && r.accountStatus !== 'active') {
-        showGate('blocked', { message: r.error });
-      }
-      return;
-    }
-    $('#loginPassword').value = '';
-    await afterSignIn(r.user);
-  } catch (e2) {
-    errEl.textContent = 'Could not reach the server. Check your connection.';
-    errEl.hidden = false;
-  } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
-});
-
-$('#setupForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const errEl = $('#setupError'); errEl.hidden = true;
-  const pw = $('#setupPw').value;
-  if (pw !== $('#setupConfirm').value) { errEl.textContent = 'The two passwords do not match.'; errEl.hidden = false; return; }
-  const btn = $('#setupBtn'); btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const r = await AUTH.setup($('#setupEmail').value.trim(), pw);
-    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
-    $('#setupPw').value = $('#setupConfirm').value = '';
-    await afterSignIn(r.user);
-  } catch (e2) {
-    errEl.textContent = 'Could not reach the server. Check your connection.'; errEl.hidden = false;
-  } finally { btn.disabled = false; btn.textContent = 'Create my account'; }
-});
-
-$('#pwForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const errEl = $('#pwError'); errEl.hidden = true;
-  const next = $('#pwNext').value, confirm2 = $('#pwConfirm').value;
-  if (next !== confirm2) { errEl.textContent = 'The two new passwords do not match.'; errEl.hidden = false; return; }
-  const btn = $('#pwBtn'); btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const r = await AUTH.changePassword($('#pwCurrent').value, next);
-    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
-    $('#pwCurrent').value = $('#pwNext').value = $('#pwConfirm').value = '';
-    await afterSignIn(AUTH.user());
-  } finally { btn.disabled = false; btn.textContent = 'Set password and continue'; }
-});
-
-$('#authBackBtn').addEventListener('click', () => showGate('login'));
+if (window.AuthUI) AuthUI.init({ signedIn: user => afterSignIn(user) });
 
 /* One initialisation path, shared by first boot and by signing in. Takes the
    server document when there is one, otherwise whatever is on this device. */
@@ -1513,13 +1787,17 @@ async function initialiseState(serverDoc) {
    offer to bring across anything that was stored locally before accounts. */
 async function afterSignIn(user) {
   if (user.mustChangePassword) { showGate('password'); return; }
+  /* Signed up but not verified or approved yet: the account-status page only.
+     The server refuses everything else for this account anyway. */
+  if (user.accountState && user.accountState !== 'active') { showGate('pending', { user }); return; }
   AUTH_MODE = 'server';
   setStorageScope(user.id);
 
   const legacy = await readLegacyLocal();
   const pulled = await AUTH.pullState();
+  if (pulled.pending) { showGate('pending', { user }); return; }
   if (pulled.forbidden) {
-    showGate('blocked', { message: pulled.error || 'Training data is not enabled for your account.' });
+    showGate('blocked', { message: pulled.error || 'Training data is not enabled for your account.', loggedIn: true });
     return;
   }
   if (pulled.ok) serverVersion = pulled.version || 0;
@@ -1583,14 +1861,16 @@ function updateAccountButton() {
   b.hidden = false;
   b.textContent = (u.name || u.email).split('@')[0];
   b.title = `${u.email} · ${u.role}`;
-  b.onclick = async () => {
+  b.onclick = () => { if (window.Views) Views.openAccount(u, signOut); else signOut(); };
+  async function signOut() {
     if (!confirm(`Signed in as ${u.email}.\n\nSign out? Anything not yet synced stays on this device until you sign back in.`)) return;
     await AUTH.logout();
     S = blankState(); S._exIndex = EX_INDEX;
     setStorageScope(null);
     AUTH_MODE = 'local';
     location.reload();
-  };
+  }
+  if (window.Views) Views.afterPermissions();
 }
 
 /* Decide how the app starts. */
@@ -1598,10 +1878,22 @@ async function resolveSession() {
   if (!window.AUTH) return { mode: 'local' };
   let r;
   try { r = await AUTH.refresh(); } catch (e) { return { mode: 'local' }; }
+  /* /?verify=TOKEN and /?reset=TOKEN links from emails. The token is removed
+     from the address bar as soon as it is read. Only when a backend exists. */
+  let link = null;
+  if (window.AuthUI && r.state !== 'no_backend') { try { link = await AuthUI.consumeUrl(); } catch (e) {} }
+  if (r.state === 'pending') {
+    showGate('pending', { user: r.user, notice: link && link.kind === 'verify' && link.ok ? 'Your email address is confirmed. Thank you.' : '' });
+    return { mode: 'gate' };
+  }
   if (r.state === 'authenticated') {
     if (r.user.mustChangePassword) { showGate('password'); return { mode: 'gate' }; }
     setStorageScope(r.user.id);
     return { mode: 'server', user: r.user };
+  }
+  if (link && r.state === 'anonymous') {
+    if (link.kind === 'reset') { showGate('reset', { token: link.token }); return { mode: 'gate' }; }
+    if (link.kind === 'verify') { showGate('verified', link); return { mode: 'gate' }; }
   }
   if (r.state === 'offline') {
     setStorageScope(r.user.id);
@@ -1624,13 +1916,16 @@ window.addEventListener('online',  () => {
   if (AUTH_MODE !== 'local' && window.AUTH) {
     AUTH.refresh().then(r => {
       if (r.state === 'authenticated') { pushToServer(); updateSyncBadge(); }
-      else if (r.state === 'anonymous') { showGate('login', { foot: 'Your session ended. Sign in to keep syncing.' }); }
+      else if (r.state === 'anonymous') { showGate('login', { foot: 'Your session ended. Log in to keep syncing.' }); }
+      else if (r.state === 'pending') { showGate('pending', { user: r.user }); }
     });
   }
 });
 window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; });
 
 (async function boot() {
+  /* Every classic script (including the views) has run by DOMContentLoaded. */
+  if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
   await initStorage();
 
   /* Who is this? The answer decides which storage namespace to open. */
@@ -1641,7 +1936,8 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
   let serverDoc = null;
   if (AUTH_MODE === 'server') {
     const pulled = await AUTH.pullState();
-    if (pulled.forbidden) { showGate('blocked', { message: pulled.error }); return; }
+    if (pulled.pending) { showGate('pending', { user: sess.user }); return; }
+    if (pulled.forbidden) { showGate('blocked', { message: pulled.error, loggedIn: true }); return; }
     if (pulled.ok) { serverDoc = pulled.doc; serverVersion = pulled.version || 0; }
   }
   const res = await initialiseState(serverDoc);
@@ -1689,9 +1985,20 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
   }
 })();
 
+/* What the section views (views-*.js) are allowed to use. They own their own markup and
+   rules; everything about state, saving and sessions stays here. */
+window.RecompHost = {
+  get S() { return S; }, set S(v) { S = v; },
+  persist, go, renderAll, toast, say, banner, openSheet, closeSheet, todayISO, esc, el, $, $$,
+  startSlot, startAdHoc, currentSession, finishSession, openCheckin, pushUndo, startTimer, endTimer, mkFig,
+  seedSets, decideForEx, get live() { return live; },
+  EX_INDEX, EXERCISES, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
+  get AUTH_MODE() { return AUTH_MODE; }, get tab() { return tab; }
+};
 window.__recomp = {
   get S() { return S; }, set S(v) { S = v; },
   go, renderAll, startTimer, decideForEx, persist,
+  seedSets, openProgressionSettings, openProgressionEdit, chooseProgression, openDetail,
   EXERCISES, EX_INDEX, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
   makeBackup, validateBackup, migrate, LEGACY_ID_MAP,
   currentProgram, rosterFor, startSession, finishSession, nextDay,

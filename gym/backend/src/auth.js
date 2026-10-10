@@ -53,7 +53,11 @@ export async function sessionFromRequest(db, req, now) {
   if (now - s.last_seen_at > SESSION_IDLE_MS) return { user: null, session: null, reason: 'idle_expired' };
   const user = await db.get('SELECT * FROM users WHERE id = ?', s.user_id);
   if (!user) return { user: null, session: null, reason: 'no_user' };
-  if (user.status !== 'active') return { user: null, session: null, reason: 'status_' + user.status, user0: user };
+  // A pending user gets a restricted session (api.js narrows it to a few routes).
+  // Suspended, revoked and rejected users are refused on every request.
+  if (user.status !== 'active' && user.status !== 'pending') {
+    return { user: null, session: null, reason: 'status_' + user.status, user0: user };
+  }
   await db.run('UPDATE sessions SET last_seen_at = ? WHERE id = ?', now, id);
   return { user, session: s, reason: null };
 }
@@ -174,13 +178,10 @@ export async function login(db, email, password, ip, ua, now) {
     await audit(db, null, 'auth.login_failed', user ? user.id : null, { email }, ip);
     return { ok: false, status: 401, error: 'Login or password is incorrect.' };
   }
-  if (user.status !== 'active') {
+  if (user.status !== 'active' && user.status !== 'pending') {
     await noteAttempt(db, key, false, now);
     await audit(db, user, 'auth.login_blocked', user.id, { status: user.status }, ip);
-    const msg = user.status === 'pending'
-      ? 'Your account is awaiting approval.'
-      : `Your account has been ${user.status}.`;
-    return { ok: false, status: 403, error: msg, accountStatus: user.status };
+    return { ok: false, status: 403, error: `Your account has been ${user.status}.`, accountStatus: user.status };
   }
   await noteAttempt(db, key, true, now);
   const token = await createSession(db, user, ip, ua, now);

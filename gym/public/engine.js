@@ -28,7 +28,12 @@ const TUNING = {
   repCapBeforeLoad: 1.0,    // fraction of the rep range top before adding load
   maxJumpPctDefault: 5,
   heavyWeekSets: 22,        // per-muscle weekly set ceiling before easing off
-  minLoadKg: 0
+  minLoadKg: 0,
+  maxEffortDefault: 'near_limit',  // highest effort that still allows an increase
+  plateauWindow: 4,         // comparable sessions that must show no improvement
+  plateauMinDays: 14,       // ... spread over at least this many days
+  plateauMinFeedback: 3,    // ... with feedback recorded on at least this many
+  plateauImprovePct: 1      // best performance must beat the earlier best by this %
 };
 
 const EFFORT_SCALE = {
@@ -215,21 +220,406 @@ function consecutiveHolds(state, variantId) {
 }
 
 /* ============================================================================
+   PROGRESSION SETTINGS, PER-SET TARGETS AND DOUBLE PROGRESSION
+
+   Each exercise VARIANT can carry its own progression settings (state
+   .exerciseSettings[variantId]). With none stored it resolves to defaults built
+   from the exercise definition and the profile, so every exercise behaves as it
+   did before until the user changes it. Settings, history and decisions are
+   keyed by variant, so a barbell press and a dumbbell press never share them.
+
+   METHODS
+     double    Hold the load and build reps within a range, set by set. When every
+               required working set reaches the top of the range, at the
+               prescribed load, with acceptable effort, technique and feedback,
+               add one available equipment increment and reset the reps to the
+               bottom of the range. (On an assisted machine the "increase" is
+               LESS assistance.)
+     reps      Reps only: bodyweight work. Build reps; optionally add load once
+               the cap is reached (addLoadAtCap).
+     duration  Holds: build seconds, then optionally add load.
+     distance  Carries: build distance, or when the distance is fixed move load.
+     manual    The app never changes the load. It reports, you decide.
+   ========================================================================== */
+const PROGRESSION_METHODS = {
+  double:   { label: 'Double progression', unit: 'reps' },
+  reps:     { label: 'Reps only',          unit: 'reps' },
+  duration: { label: 'Duration',           unit: 's' },
+  distance: { label: 'Distance',           unit: 'm' },
+  manual:   { label: 'Manual',             unit: null }
+};
+function defaultMethodFor(ex) {
+  switch (ex.modality) {
+    case 'bodyweight_reps': return 'reps';
+    case 'timed_hold':      return 'duration';
+    case 'carry':           return 'distance';
+    default:                return 'double';
+  }
+}
+/* Changing any of these changes what "qualifying" means, so sessions before the
+   change stop counting towards the next increase. Increments and the jump limit
+   do not: they change what is allowed, not what was achieved. */
+const QUALIFYING_FIELDS = ['method', 'sets', 'repMin', 'repMax', 'minReserve',
+                           'maxEffort', 'qualifyingSessions', 'requireTechnique'];
+
+function r2(x) { return Math.round(x * 100) / 100; }
+
+function resolveSettings(state, ex) {
+  const profile = (state && state.profile) || {};
+  const stored = ((state && state.exerciseSettings) || {})[ex.id] || null;
+  const baseInc = incrementFor(ex, profile);
+  const unitStep = (ex.modality === 'timed_hold' || ex.modality === 'carry') ? 5 : 1;
+  const d = {
+    method: defaultMethodFor(ex),
+    sets: ex.sets, repMin: ex.lo, repMax: ex.hi,
+    increments: [baseInc],
+    minReserve: TUNING.reserveProgressMin,
+    maxEffort: TUNING.maxEffortDefault,
+    qualifyingSessions: 1,
+    maxJumpPct: profile.maxLoadJumpPct || TUNING.maxJumpPctDefault,
+    requireTechnique: false,
+    addLoadAtCap: true,       // reps/duration: add load after the cap (legacy behaviour)
+    strictLimit: false,       // carries with a fixed distance may exceed the limit, loudly
+    backoff: null,            // { sets, pct } deliberate lighter sets after the working sets
+    repStep: unitStep,        // how much a per-set target moves between sessions
+    qualEpoch: null, changedAt: null
+  };
+  /* The plan may set sets and the rep range per exercise (state.planOverrides).
+     Settings the user has set themselves win; only fields they actually changed
+     are pinned, so a plan change still reaches everything they left alone. */
+  const pov = (state && state.planOverrides && state.planOverrides[ex.id]) || null;
+  const planned = {};
+  if (pov) ['sets', 'repMin', 'repMax', 'startLoad', 'since'].forEach(k => { if (pov[k] != null) planned[k] = pov[k]; });
+  let userPart = stored ? Object.assign({}, stored) : {};
+  if (stored && Array.isArray(stored.pinned)) {
+    ['sets', 'repMin', 'repMax'].forEach(k => { if (stored.pinned.indexOf(k) < 0) delete userPart[k]; });
+  }
+  const s = Object.assign({}, d, planned, userPart);
+  s.fromPlan = !!pov;
+  s.increments = cleanIncrements(s.increments, baseInc);
+  s.maxEffortV = (EFFORT_SCALE[s.maxEffort] || EFFORT_SCALE[TUNING.maxEffortDefault]).v;
+  if (!PROGRESSION_METHODS[s.method]) s.method = d.method;
+  s.variantId = ex.id;
+  s.source = stored ? 'custom' : 'default';
+  return s;
+}
+function cleanIncrements(list, fallback) {
+  const out = (Array.isArray(list) ? list : [list])
+    .map(Number).filter(n => Number.isFinite(n) && n > 0)
+    .map(r2);
+  const uniq = Array.from(new Set(out)).sort((a, b) => a - b);
+  return uniq.length ? uniq : [fallback || 2.5];
+}
+/* The exercise as the engine reasons about it: the definition with the user's
+   sets and rep range laid over it. Everything downstream reads ex.sets, ex.lo
+   and ex.hi, so the settings take effect everywhere without special cases. */
+function effectiveEx(ex, settings) {
+  return Object.assign({}, ex, { sets: settings.sets, lo: settings.repMin, hi: settings.repMax });
+}
+
+/* Validate and normalise what the settings form (or a restored backup) hands
+   over. Returns the cleaned settings and a list of problems; never throws. */
+function normaliseSettings(raw, ex) {
+  const problems = [];
+  const intIn = (v, lo, hi, name, dflt) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < lo || n > hi) { problems.push(`${name} must be a whole number from ${lo} to ${hi}.`); return dflt; }
+    return n;
+  };
+  const r = raw || {};
+  const out = {};
+  out.method = PROGRESSION_METHODS[r.method] ? r.method : (problems.push('Choose a progression method.'), defaultMethodFor(ex));
+  out.sets = intIn(r.sets, 1, 10, 'Working sets', ex.sets);
+  const maxRep = (ex.modality === 'timed_hold' || ex.modality === 'carry') ? 600 : 100;
+  out.repMin = intIn(r.repMin, 1, maxRep, 'Minimum', ex.lo);
+  out.repMax = intIn(r.repMax, 1, maxRep, 'Maximum', ex.hi);
+  if (out.repMax < out.repMin) problems.push('The maximum cannot be below the minimum.');
+  let incs = r.increments;
+  if (typeof incs === 'string') incs = incs.split(/[\s,;/]+/).filter(Boolean);
+  const cleaned = (Array.isArray(incs) ? incs : []).map(Number);
+  if (!cleaned.length || cleaned.some(n => !Number.isFinite(n) || n <= 0 || n > 100)) {
+    problems.push('Increments must be positive numbers, for example 1.25, 2.5, 5.');
+    out.increments = [2.5];
+  } else out.increments = cleanIncrements(cleaned, 2.5);
+  out.minReserve = intIn(r.minReserve, 0, 4, 'Reps in reserve', TUNING.reserveProgressMin);
+  out.maxEffort = EFFORT_SCALE[r.maxEffort] ? r.maxEffort : (problems.push('Choose a highest acceptable effort.'), TUNING.maxEffortDefault);
+  out.qualifyingSessions = intIn(r.qualifyingSessions, 1, 5, 'Qualifying sessions', 1);
+  const jp = Number(r.maxJumpPct);
+  if (!Number.isFinite(jp) || jp < 0.5 || jp > 25) { problems.push('The progression limit must be between 0.5% and 25%.'); out.maxJumpPct = TUNING.maxJumpPctDefault; }
+  else out.maxJumpPct = jp;
+  out.requireTechnique = !!r.requireTechnique;
+  out.addLoadAtCap = r.addLoadAtCap === undefined ? true : !!r.addLoadAtCap;
+  out.strictLimit = !!r.strictLimit;
+  if (r.backoff && (r.backoff.sets || r.backoff.pct)) {
+    const bs = intIn(r.backoff.sets, 1, 4, 'Back-off sets', 1);
+    const bp = Number(r.backoff.pct);
+    if (!Number.isFinite(bp) || bp < 50 || bp > 95) problems.push('Back-off load must be 50% to 95% of the top load.');
+    out.backoff = { sets: bs, pct: Number.isFinite(bp) ? bp : 85 };
+  } else out.backoff = null;
+  out.repStep = intIn(r.repStep === undefined ? ((ex.modality === 'timed_hold' || ex.modality === 'carry') ? 5 : 1) : r.repStep, 1, 60, 'Step', 1);
+  return { settings: out, problems };
+}
+
+/* Save settings for a variant. Qualifying history restarts only when a field
+   that changes what "qualifies" actually changed. Completed sessions, their
+   prescriptions and their decisions are never touched. */
+function saveExerciseSettings(state, ex, incoming, dateISO) {
+  const before = resolveSettings(state, ex);
+  const { settings, problems } = normaliseSettings(incoming, ex);
+  if (problems.length) return { ok: false, problems };
+  const changedQual = QUALIFYING_FIELDS.some(k => JSON.stringify(before[k]) !== JSON.stringify(settings[k]));
+  state.exerciseSettings = state.exerciseSettings || {};
+  const prev = state.exerciseSettings[ex.id] || {};
+  const pinned = ['sets', 'repMin', 'repMax'].filter(k => settings[k] !== before[k] || (Array.isArray(prev.pinned) && prev.pinned.indexOf(k) >= 0));
+  state.exerciseSettings[ex.id] = Object.assign({}, settings, {
+    pinned, qualEpoch: changedQual ? (dateISO || null) : (prev.qualEpoch || null),
+    changedAt: Date.now()
+  });
+  return { ok: true, settings: resolveSettings(state, ex), restartedQualifying: changedQual };
+}
+function resetExerciseSettings(state, ex) {
+  if (state.exerciseSettings) delete state.exerciseSettings[ex.id];
+  return resolveSettings(state, ex);
+}
+
+/* ---------------------------------------------------------- set analysis
+   Only performed, non-warm-up, non-back-off sets with a weight and a rep count
+   are evidence. A skipped or unconfirmed set is not. */
+function _perf(s) { return !!s && (s.status === 'confirmed' || s.status === 'edited'); }
+function _isTop(s) { return !!s && !s.warmup && s.role !== 'backoff'; }
+function _plannedTop(entry) { return (entry.sets || []).filter(_isTop); }
+function _doneTop(entry) {
+  return _plannedTop(entry).filter(s => _perf(s) &&
+    s.actualReps != null && !Number.isNaN(s.actualReps) &&
+    s.actualWeight != null && !Number.isNaN(s.actualWeight));
+}
+function _modal(values, preferLower) {
+  const counts = new Map();
+  values.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+  let best = null, bestN = -1;
+  [...counts.entries()].sort((a, b) => preferLower ? a[0] - b[0] : b[0] - a[0]).forEach(([v, n]) => {
+    if (n > bestN) { best = v; bestN = n; }
+  });
+  return best;
+}
+/* "At or beyond the load" means at least as hard. For an assisted machine the
+   harder weight is the LOWER one. */
+function _atLeastAsHard(w, load, assisted) {
+  return assisted ? w <= load + 1e-9 : w >= load - 1e-9;
+}
+
+/* Evaluate ONE recorded session of an exercise against the settings.
+   Everything the next decision, the preview and the tests need is here. */
+function evaluateEntry(entry, settings, ex) {
+  const assisted = ex.modality === 'assisted';
+  const planned = _plannedTop(entry);
+  const done = _doneTop(entry);
+  const plannedLoads = planned.map(s => s.plannedWeight).filter(w => w != null);
+  const dec = entry.decision && entry.decision.prescription;
+  const prescribed = plannedLoads.length ? _modal(plannedLoads, !assisted)
+                   : (dec && dec.load != null ? dec.load : null);
+
+  /* The comparable load is the prescribed load when most of the sets were done at
+     or beyond it; otherwise it is what was actually done (modal, ties resolve
+     to the easier load). A heavy opener followed by lighter back-off sets
+     therefore never turns into "all sets at the heavier load". */
+  let baseline = null;
+  if (done.length) {
+    const reached = prescribed != null
+      ? done.filter(s => _atLeastAsHard(s.actualWeight, prescribed, assisted)) : [];
+    baseline = (prescribed != null && reached.length && reached.length * 2 >= done.length)
+      ? prescribed : _modal(done.map(s => s.actualWeight), !assisted);
+    if (assisted && baseline != null && prescribed == null) baseline = _modal(done.map(s => s.actualWeight), false);
+  }
+  const atLoad = baseline == null ? [] : done.filter(s => _atLeastAsHard(s.actualWeight, baseline, assisted));
+  const atLoadReps = atLoad.map(s => s.actualReps);
+  const exactReps = baseline == null ? [] : done.filter(s => Math.abs(s.actualWeight - baseline) < 1e-9).map(s => s.actualReps);
+  const recordedSets = entry.decision && entry.decision.prescription && Number.isFinite(entry.decision.prescription.sets)
+    ? entry.decision.prescription.sets : null;
+  const need = recordedSets != null ? recordedSets : settings.sets;      // judged against what that session asked for
+  const topCount = atLoadReps.filter(r => r >= settings.repMax).length;
+  const setsOk = atLoad.length >= need;
+  const repsOk = topCount >= need;
+
+  const fbk = entry.feedback || null;
+  const effort = fbk && fbk.effort ? EFFORT_SCALE[fbk.effort] || null : null;
+  const reserve = fbk && fbk.reserve != null ? RESERVE_SCALE[String(fbk.reserve)] : undefined;
+  const tech = fbk && fbk.technique ? fbk.technique : null;
+  const cap = fbk && fbk.capacity ? fbk.capacity : null;
+  const pain = !!(fbk && fbk.pain && fbk.pain.present);
+  const sufficient = !!(effort || reserve != null) && !(settings.requireTechnique && (!tech || tech === 'unsure'));
+
+  const blocks = [];
+  if (!setsOk) blocks.push('sets');
+  if (!repsOk) blocks.push('reps');
+  if (!sufficient) blocks.push('feedback_missing');
+  if (cap === 'needed_less') blocks.push('needed_less');
+  if (tech === 'deteriorating') blocks.push('technique');
+  if (pain) blocks.push('pain');
+  if ((effort && effort.v >= 5) || reserve === 0) blocks.push('maximal');
+  else if (effort && effort.v > settings.maxEffortV) blocks.push('effort');
+  if (reserve != null && reserve > 0 && reserve < settings.minReserve) blocks.push('reserve');
+
+  return {
+    baseline, prescribed, performed: done.length, plannedCount: planned.length,
+    atLoadReps, exactReps, need, setsOk, repsOk, topCount, blocks,
+    qualifies: blocks.length === 0,
+    effort, reserve: reserve === undefined ? null : reserve, tech, cap, pain, sufficient,
+    allReps: done.map(s => s.actualReps)
+  };
+}
+
+/* ------------------------------------------------- history (engine-local) */
+function historyEntries(state, variantId) {
+  const out = [];
+  (state.sessions || []).filter(s => s.status === 'completed')
+    .sort((a, b) => a.date === b.date ? (a.startedAt || 0) - (b.startedAt || 0) : (a.date < b.date ? -1 : 1))
+    .forEach(sess => (sess.entries || []).forEach(e => {
+      if (e.variantId !== variantId || e.skipped) return;
+      if (!_doneTop(e).length) return;
+      out.push({ session: sess, entry: e });
+    }));
+  return out;
+}
+/* Consecutive qualifying sessions at the same comparable load, newest first.
+   Sessions before the last qualifying-rule change do not count. */
+function qualifyingStreak(state, variantId, settings, ex, load) {
+  const hist = historyEntries(state, variantId).reverse();
+  let n = 0;
+  for (const h of hist) {
+    if (settings.qualEpoch && h.session.date < settings.qualEpoch) break;
+    const ev = evaluateEntry(h.entry, settings, ex);
+    if (ev.baseline == null || Math.abs(ev.baseline - load) > 1e-9) break;
+    if (!ev.qualifies) break;
+    n++;
+  }
+  return n;
+}
+function techniqueStreak(state, variantId) {
+  const hist = historyEntries(state, variantId).reverse();
+  let n = 0;
+  for (const h of hist) {
+    if (h.entry.feedback && h.entry.feedback.technique === 'deteriorating') n++; else break;
+  }
+  return n;
+}
+function priorNonDeloadEntry(state, variantId, beforeEntry) {
+  const hist = historyEntries(state, variantId);
+  const i = hist.findIndex(h => h.entry === beforeEntry);
+  const upto = i < 0 ? hist : hist.slice(0, i);
+  for (let k = upto.length - 1; k >= 0; k--) {
+    const a = upto[k].entry.decision && upto[k].entry.decision.action;
+    if (a !== 'deload') return upto[k];
+  }
+  return null;
+}
+
+/* ------------------------------------------------------- plateau detection
+   A stall is NOT "the load stayed the same for three sessions": adding reps at
+   one load is progress and is the whole point of double progression. A plateau
+   needs enough comparable history, no improvement in comparable performance
+   (load OR reps at that load), and feedback recorded on enough of those
+   sessions that the stall is not just missing information.
+
+   Comparable performance score = the best set's estimated strength, using the
+   Epley form on an effective load: the load itself; bodyweight plus load for
+   bodyweight work; bodyweight minus assistance on an assisted machine. Where
+   there is no load at all it falls back to reps. */
+function perfScore(entry, ex, bw) {
+  const body = bw || 80;
+  let best = 0;
+  _doneTop(entry).forEach(s => {
+    let eff;
+    if (ex.modality === 'assisted') eff = Math.max(1, body - s.actualWeight);
+    else if (ex.modality === 'bodyweight_reps' || ex.modality === 'timed_hold') eff = body * 0.6 + s.actualWeight;
+    else eff = s.actualWeight;
+    const v = eff > 0 ? eff * (1 + s.actualReps / 30) : s.actualReps;
+    if (v > best) best = v;
+  });
+  return best;
+}
+function detectPlateau(state, variantId, settings, ex, todayStr) {
+  const W = TUNING.plateauWindow;
+  const bw = state.profile && state.profile.bodyweightKg;
+  let hist = historyEntries(state, variantId).filter(h => {
+    const a = h.entry.decision && h.entry.decision.action;
+    return a !== 'deload';                           // an easy week is not evidence of a stall
+  });
+  if (settings.qualEpoch) hist = hist.filter(h => h.session.date >= settings.qualEpoch);
+  if (hist.length < W) return null;
+  const win = hist.slice(-W);
+  const earlier = hist.slice(0, hist.length - (W - 1));          // everything up to and including the window's first session
+  const ref = Math.max(...earlier.map(h => perfScore(h.entry, ex, bw)));
+  const recentBest = Math.max(...win.slice(1).map(h => perfScore(h.entry, ex, bw)));
+  if (recentBest > ref * (1 + TUNING.plateauImprovePct / 100)) return null;      // something improved
+  const spanDays = daysSince(win[0].session.date, win[win.length - 1].session.date);
+  if (spanDays < TUNING.plateauMinDays) return null;
+  const known = win.filter(h => { const f = h.entry.feedback; return f && (f.effort || (f.reserve != null && f.reserve !== 'unsure')); }).length;
+  if (known < TUNING.plateauMinFeedback) return null;                            // unknown stays unknown
+  return { sessions: W, spanDays, feedbackKnown: known };
+}
+
+/* ------------------------------------------------------ choosing the increase
+   Returns the smallest available increment that respects the progression limit,
+   or says why none does. Never invents a weight the user has not listed. */
+function pickIncrease(base, settings) {
+  const incs = settings.increments;
+  const pct = settings.maxJumpPct;
+  const cap = base ? (base * pct) / 100 : Infinity;
+  const okList = incs.filter(i => i <= cap + 1e-9);
+  if (okList.length) return { allowed: true, inc: okList[0], next: r2((base || 0) + okList[0]), pct, cap };
+  return { allowed: false, smallest: incs[0], pct, cap, asPct: base ? (incs[0] / base) * 100 : null };
+}
+
+/* -------------------------------------------------------- per-set targets
+   Targets come from what each set actually did last time at this load. They
+   move at most one step per session and are clamped to the range, so the app
+   never jumps straight to the maximum on every set.
+     build   each set +1 step, up to the maximum      (the normal case)
+     repeat  each set as last time                    (blocked by effort etc.)
+     reset   the bottom of the range on every set     (after a load increase)
+     mid     the middle of the range                  (easing back)             */
+function buildSetTargets(prevReps, n, repMin, repMax, mode, step) {
+  const st = step || 1;
+  const prev = (prevReps || []).filter(r => r != null);
+  const fallback = prev.length ? Math.min(...prev) : repMin;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const p = i < prev.length ? prev[i] : fallback;
+    let t;
+    if (mode === 'reset') t = repMin;
+    else if (mode === 'mid') t = Math.round((repMin + repMax) / 2);
+    else if (mode === 'repeat') t = p;
+    else t = p + st;
+    out.push(Math.max(repMin, Math.min(repMax, t)));
+  }
+  return out;
+}
+
+/* ============================================================================
    THE DECISION
    ctx = { state, ex, variantId, checkin, todayISO, history?, last? }
    ========================================================================== */
-function decide(ctx) {
-  const { state, ex } = ctx;
+function decideCore(ctx) {
+  const { state } = ctx;
+  const settings = resolveSettings(state, ctx.ex);
+  if (ctx.settingsOverride) Object.assign(settings, ctx.settingsOverride);   // e.g. a shortened session today
+  const ex = effectiveEx(ctx.ex, settings);          // sets and rep range come from the settings
+  const isDouble = settings.method === 'double';
   const today = ctx.todayISO;
-  const profile = state.profile || {};
+  const profile = Object.assign({}, state.profile || {}, { maxLoadJumpPct: settings.maxJumpPct });
   const trace = [];
   const push = (rule, detail) => trace.push({ rule, detail });
 
   const last = ctx.last !== undefined ? ctx.last : null;
   const fb = last && last.feedback ? last.feedback : null;
-  const sum = last ? last.summary : null;
+  const evd = (isDouble && last && last.entry) ? evaluateEntry(last.entry, settings, ex) : null;
+  const sum = last ? (evd ? Object.assign({}, last.summary, {
+      workingWeight: evd.baseline, repsAtWorkingWeight: evd.atLoadReps,
+      setsAtWorkingWeight: evd.atLoadReps.length, targetSets: evd.need, targetReps: settings.repMax
+    }) : last.summary) : null;
   const mod = MODALITY[ex.modality] || MODALITY.load_reps;
-  const inc = incrementFor(ex, profile);
+  const inc = settings.increments[0];
   const ready = readiness(ctx.checkin);
   const today0 = ctx.todayISO;
 
@@ -321,9 +711,28 @@ function decide(ctx) {
     });
   }
 
-  const base = baselineFrom(last, ex, inc);
+  const base = evd ? evd.baseline : baselineFrom(last, ex, inc);
   const gap = daysSince(last.date, today);
   push('history', `Last done ${gap} day(s) ago at ${fmtLoad(base, ex)}`);
+
+  /* ---------- 1a. A GOAL CHANGE moved the rep range. History is kept, but the load
+        for the new range is re-estimated once, rather than carried over blindly. */
+  if (settings.startLoad != null && settings.since && last.date < settings.since && !settings.__rebased) {
+    push('rebase', `Rep range changed; starting at ${settings.startLoad} kg`);
+    return finish({
+      action: 'hold',
+      prescription: buildPrescription(ex, settings.startLoad, targetReps(ex, 'range'), ex.sets, mod),
+      explain: {
+        what: `Starting ${fmtLoad(settings.startLoad, ex)} for the new ${settings.repMin}–${settings.repMax} range.`,
+        why: `Your plan changed the rep range, so the load from the old range (${fmtLoad(base, ex)}) is not the right place to start. This is estimated from your recent best on this exercise, then the normal progression rules take over.`,
+        next: `Work to ${settings.repMax} ${mod.unit} on every set with the effort and technique you set, and the load moves up from here.`
+      },
+      flags: ['rebase'], trace, ready, confidence: 'medium'
+    });
+  }
+
+  /* ---------- 1b. MANUAL: the app never moves the load. */
+  if (settings.method === 'manual') return finish(manualDecision(ex, base, last, settings, gap, trace, ready, mod));
 
   /* ---------- 2. RETURN AFTER A BREAK — before any progression logic. */
   if (gap > (profile.returnBreakDays || TUNING.staleDays)) {
@@ -372,21 +781,42 @@ function decide(ctx) {
     });
   }
 
-  /* ---------- 3b. PLATEAU — checked before the individual hold reasons, so a
-        stall is caught whatever kept producing the holds. */
-  const holdStreak = consecutiveHolds(state, ctx.variantId);
-  if (holdStreak >= TUNING.plateauHolds) {
-    push('plateau', `${holdStreak} consecutive holds at ${fmtLoad(base, ex)}`);
+  /* ---------- 3a'. RE-ENTRY AFTER A DELOAD. The light week is not the baseline.
+        Go back to the load used before it, repeat that session's reps, and do
+        not progress on the first session back. */
+  if (last.entry && last.entry.decision && last.entry.decision.action === 'deload') {
+    const prior = priorNonDeloadEntry(state, ctx.variantId, last.entry);
+    const pe = prior ? evaluateEntry(prior.entry, settings, ex) : null;
+    if (pe && pe.baseline != null) {
+      push('deload.reentry', `Back to ${fmtLoad(pe.baseline, ex)}, the load before the deload`);
+      return finish({
+        action: 'hold',
+        prescription: Object.assign(buildPrescription(ex, pe.baseline, targetReps(ex, 'range'), ex.sets, mod),
+          { setTargets: buildSetTargets(pe.atLoadReps, settings.sets, settings.repMin, settings.repMax, 'repeat', settings.repStep) }),
+        explain: {
+          what: `Back to ${fmtLoad(pe.baseline, ex)}, the load you were using before the deload.`,
+          why: 'The deload week was deliberately light, so it is not a starting point. The first session back repeats the reps from before it and does not add load.',
+          next: 'Normal progression resumes after this session, from the load you were actually working at.'
+        },
+        flags: ['post_deload'], trace, ready, confidence: 'medium'
+      });
+    }
+  }
+
+  /* ---------- 3b. PLATEAU: from comparable performance and feedback across
+        enough history. Adding reps at one load is progress, so a load that
+        has simply stayed put is NOT a stall. */
+  const plateau = detectPlateau(state, ctx.variantId, settings, ex, today);
+  if (plateau) {
+    push('plateau', `${plateau.sessions} comparable sessions over ${plateau.spanDays} days, no improvement in load or reps`);
     return finish(substituteDecision(ex, base, mod, trace, ready,
-      `This load has not moved in ${holdStreak} sessions.`));
+      `Across the last ${plateau.sessions} comparable sessions (${plateau.spanDays} days) neither the load nor the reps at that load have improved, and feedback was recorded on ${plateau.feedbackKnown} of them.`));
   }
 
   /* ---------- 4. DID THE LAST SESSION ACTUALLY MEET THE PRESCRIPTION? */
-  const metSets = sum.setsAtWorkingWeight >= Math.max(1, (sum.targetSets || ex.sets) - 0);
-  const repTarget = sum.targetReps || ex.hi;
-  const allRepsMet = sum.repsAtWorkingWeight.length > 0 &&
-                     sum.repsAtWorkingWeight.every(r => r >= repTarget);
-  const anyShort = sum.repsAtWorkingWeight.some(r => r < (sum.targetReps || ex.lo));
+  const repTarget = isDouble ? settings.repMax : (sum.targetReps || ex.hi);
+  const allRepsMet = isDouble ? (evd.setsOk && evd.repsOk)
+    : (sum.repsAtWorkingWeight.length > 0 && sum.repsAtWorkingWeight.every(r => r >= repTarget));
   push('completion', `${sum.setsAtWorkingWeight}/${sum.targetSets} sets at ${fmtLoad(sum.workingWeight, ex)}; reps ${sum.repsAtWorkingWeight.join(', ') || '—'} vs target ${repTarget}`);
   if (sum.mixedLoads) push('mixed.loads', `Working load taken as the most common set (${fmtLoad(sum.workingWeight, ex)}), not the heaviest (${fmtLoad(sum.topWeight, ex)})`);
 
@@ -402,10 +832,10 @@ function decide(ctx) {
   /* ---------- 6. TECHNIQUE BREAKDOWN overrides a good-looking result. */
   if (tech === 'deteriorating') {
     push('technique.deteriorating', 'Form degraded — load held');
-    const holds = consecutiveHolds(state, ctx.variantId);
-    if (holds >= TUNING.plateauHolds) {
+    const tStreak = techniqueStreak(state, ctx.variantId);
+    if (tStreak >= TUNING.plateauHolds) {
       return finish(substituteDecision(ex, base, mod, trace, ready,
-        `Technique has been breaking down at ${fmtLoad(base, ex)} across ${holds + 1} sessions.`));
+        `Technique has been breaking down at ${fmtLoad(base, ex)} across ${tStreak} sessions.`));
     }
     return finish({
       action: 'hold',
@@ -421,7 +851,28 @@ function decide(ctx) {
 
   /* ---------- 7. MISSED THE REPS — hold or reduce. */
   if (!allRepsMet) {
-    const badlyShort = sum.repsAtWorkingWeight.some(r => r < (ex.lo - 1));
+    // A heavier extra set is not a short set at the working load: judge only the sets AT it.
+    const badlyShort = (isDouble ? evd.exactReps : sum.repsAtWorkingWeight).some(r => r < (ex.lo - 1));
+    if (isDouble && !badlyShort) {
+      // Double progression: the load is not earned yet, so it holds and the reps build.
+      const reps = evd.atLoadReps;
+      const incomplete = !evd.setsOk;
+      push('reps.building', incomplete
+        ? `${reps.length}/${evd.need} sets at ${fmtLoad(base, ex)}`
+        : `Reps ${reps.join(', ')} vs top ${settings.repMax}`);
+      return finish({
+        action: 'hold',
+        prescription: buildPrescription(ex, base, targetReps(ex, 'range'), ex.sets, mod),
+        explain: {
+          what: `Staying at ${fmtLoad(base, ex)} and building reps.`,
+          why: incomplete
+            ? `Only ${reps.length} of ${evd.need} working sets were completed at ${fmtLoad(base, ex)} (lighter or unfinished sets do not count towards the load), so it has not been earned yet.`
+            : `Not every set reached ${settings.repMax} ${mod.unit} yet (${reps.join(' / ')}). The load stays put and each set adds a rep, and that is progress at the same weight.`,
+          next: `Reach ${settings.repMax} ${mod.unit} on all ${ex.sets} sets at ${fmtLoad(base, ex)} with the effort and technique you set, and the load moves up.`
+        },
+        flags: ['building_reps'], trace, ready, confidence: 'high'
+      });
+    }
     const action = badlyShort ? 'reduce' : 'hold';
     const newLoad = badlyShort ? scaleLoad(base, 0.92, inc) : base;
     push(badlyShort ? 'reps.well.short' : 'reps.short',
@@ -488,8 +939,23 @@ function decide(ctx) {
     });
   }
 
+  // 8a'. Effort above the limit set for this exercise (but short of maximum).
+  if (effort && effort.v > settings.maxEffortV) {
+    push('effort.above_limit', `${effort.label} is above the allowed ${EFFORT_SCALE[settings.maxEffort].label.toLowerCase()}`);
+    return finish({
+      action: 'hold',
+      prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
+      explain: {
+        what: `Holding ${fmtLoad(base, ex)}.`,
+        why: `You finished the reps, but effort came back ${effort.label.toLowerCase()}, above the ${EFFORT_SCALE[settings.maxEffort].label.toLowerCase()} you set as the most this exercise may cost before the load goes up.`,
+        next: `Repeat ${fmtLoad(base, ex)} and aim for ${EFFORT_SCALE[settings.maxEffort].label.toLowerCase()} or easier.`
+      },
+      flags: ['effort_high'], trace, ready, confidence: 'high'
+    });
+  }
+
   // 8b. Missing feedback: hold. Unknown never unlocks progression.
-  if (!feedbackKnown || reserveUnknown && !effort) {
+  if (!feedbackKnown || reserveUnknown && !effort || (isDouble && settings.requireTechnique && (!tech || tech === 'unsure'))) {
     push('feedback.unknown.hold', 'Not enough feedback to justify a load increase');
     return finish({
       action: 'hold',
@@ -534,31 +1000,69 @@ function decide(ctx) {
   }
 
   // 8e. Not enough in reserve.
-  if (reserve != null && reserve < TUNING.reserveProgressMin) {
-    push('reserve.low', `Only ${reserve} rep(s) in reserve, need ${TUNING.reserveProgressMin}`);
+  if (reserve != null && reserve < settings.minReserve) {
+    push('reserve.low', `Only ${reserve} rep(s) in reserve, need ${settings.minReserve}`);
     return finish({
       action: 'hold',
       prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
       explain: {
         what: `Holding ${fmtLoad(base, ex)}.`,
-        why: `You had ${reserve} clean rep${reserve === 1 ? '' : 's'} left. The engine wants at least ${TUNING.reserveProgressMin} before it adds load, so the increase lands on a session you can actually complete.`,
-        next: `Repeat ${fmtLoad(base, ex)}. Two or more in reserve and it moves up.`
+        why: `You had ${reserve} clean rep${reserve === 1 ? '' : 's'} left. This exercise needs at least ${settings.minReserve} before it adds load, so the increase lands on a session you can actually complete.`,
+        next: `Repeat ${fmtLoad(base, ex)}. ${settings.minReserve} or more in reserve and it moves up.`
       },
       flags: [], trace, ready, confidence: 'high'
     });
   }
 
+  // 8e'. The plan is holding loads (reduced-demand or low-energy day): nothing goes up.
+  if (ctx.holdLoad) {
+    push('plan.hold', 'The plan is holding loads for this session');
+    return finish({
+      action: 'hold',
+      prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
+      explain: {
+        what: `Holding ${fmtLoad(base, ex)} today.`,
+        why: 'Your plan is holding loads for this session because the workload is being reduced. An increase that was earned is not lost: it is simply not added on a lighter day.',
+        next: 'Normal progression resumes in the next session without this hold.'
+      },
+      flags: ['plan_hold'], trace, ready, confidence: 'high'
+    });
+  }
+
+  // 8f. Several qualifying sessions may be required before the load moves.
+  if (isDouble && settings.qualifyingSessions > 1) {
+    const streak = qualifyingStreak(state, ctx.variantId, settings, ex, base);
+    if (streak < settings.qualifyingSessions) {
+      push('qualifying.wait', `${streak} of ${settings.qualifyingSessions} qualifying sessions at ${fmtLoad(base, ex)}`);
+      return finish({
+        action: 'hold',
+        prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
+        explain: {
+          what: `Holding ${fmtLoad(base, ex)}: qualifying session ${streak} of ${settings.qualifyingSessions}.`,
+          why: `That session met the standard (all ${ex.sets} sets at ${settings.repMax} ${mod.unit} with the effort and technique you set). This exercise needs ${settings.qualifyingSessions} in a row before the load goes up, so one good session is recorded, not rewarded yet.`,
+          next: `Repeat ${fmtLoad(base, ex)} to the same standard. ${settings.qualifyingSessions - streak} more qualifying session${settings.qualifyingSessions - streak === 1 ? '' : 's'} and it moves up.`
+        },
+        flags: ['qualifying_wait'], trace, ready, confidence: 'high'
+      });
+    }
+  }
+
   /* ---------- 9. PROGRESS. Earned, and only one dimension at a time. */
   return finish(progressDecision(ex, base, inc, mod, profile, trace, ready,
-                                 { effort, reserve, cap, sum }));
+                                 { effort, reserve, cap, sum, settings, evd }));
 }
 
 /* ------------------------------------------------------------- outcomes */
 function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
+  if (ev.settings && ev.settings.method === 'double') return doubleProgress(ex, base, mod, trace, ready, ev);
   const reserveTxt = ev.reserve == null ? '' : ` with ${ev.reserve} clean rep${ev.reserve === 1 ? '' : 's'} in reserve`;
   const effortTxt = ev.effort ? ev.effort.label.toLowerCase() : 'manageable';
 
-  if (mod.progresses === 'reps') {
+  const m = ev.settings ? ev.settings.method : null;
+  const kind = m === 'reps' ? 'reps' : m === 'duration' ? 'time' : m === 'distance' ? (ex.lo < ex.hi ? 'time' : 'load') : mod.progresses;
+  const stepUnit = ev.settings ? ev.settings.repStep : 5;
+  const addLoadAtCap = !ev.settings || ev.settings.addLoadAtCap !== false;
+  if (kind === 'reps') {
     // Bodyweight: add a rep until the cap, then suggest adding load.
     const atCap = (ev.sum.repsAtWorkingWeight[0] || 0) >= ex.hi;
     if (!atCap) {
@@ -571,6 +1075,15 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
           next: `Clear ${next} on every set and it climbs again, up to ${ex.hi}. After that the progression switches to added load.`
         }, flags: ['progress_reps'], trace, ready, confidence: 'high' };
     }
+    if (!addLoadAtCap) {
+      trace.push({ rule: 'progress.reps.cap.hold', detail: `rep cap ${ex.hi} reached, reps-only method` });
+      return { action: 'hold', prescription: buildPrescription(ex, base, { lo: ex.hi, hi: ex.hi }, ex.sets, mod),
+        explain: {
+          what: `Holding at the top of the range (${ex.hi} reps).`,
+          why: `You are at ${ex.hi} reps on every set and this exercise is set to reps only, so the app does not add load for you.`,
+          next: `Raise the rep range, add load yourself, or switch the method to double progression in this exercise's settings.`
+        }, flags: ['reps_cap'], trace, ready, confidence: 'high' };
+    }
     const added = roundToIncrement(inc, inc);
     trace.push({ rule: 'progress.reps.cap', detail: `rep cap ${ex.hi} reached, add ${added}` });
     return { action: 'progress', prescription: buildPrescription(ex, added, { lo: ex.lo, hi: ex.lo }, ex.sets, mod),
@@ -581,22 +1094,22 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
       }, flags: ['progress_load'], trace, ready, confidence: 'high' };
   }
 
-  if (mod.progresses === 'assist') {
+  if (kind === 'assist') {
     const next = Math.max(0, base - inc);
     trace.push({ rule: 'progress.assist', detail: `assistance ${base} -> ${next}` });
     return { action: 'progress', prescription: buildPrescription(ex, next, targetReps(ex, 'range'), ex.sets, mod),
       explain: {
         what: `Assistance down from ${base} kg to ${next} kg.`,
         why: `On an assisted movement, less help is the progression. Last session was ${effortTxt}${reserveTxt} with controlled technique, so you can carry more of your own bodyweight.`,
-        next: next === 0 ? 'That is the full unassisted movement — the next step is the unassisted variant.'
+        next: next === 0 ? 'That is the full unassisted movement, so the next step is the unassisted variant.'
                          : `Hit ${ex.lo}–${ex.hi} reps at ${next} kg of assistance and it drops again.`
       }, flags: ['progress_assist'], trace, ready, confidence: 'high' };
   }
 
-  if (mod.progresses === 'time') {
+  if (kind === 'time') {
     const cur = ev.sum.repsAtWorkingWeight[0] || ex.lo;
     if (cur < ex.hi) {
-      const next = Math.min(ex.hi, cur + 5);
+      const next = Math.min(ex.hi, cur + stepUnit);
       trace.push({ rule: 'progress.time', detail: `${cur}s -> ${next}s` });
       return { action: 'progress', prescription: buildPrescription(ex, base, { lo: next, hi: next }, ex.sets, mod),
         explain: {
@@ -604,6 +1117,13 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
           why: `Last hold was ${effortTxt}${reserveTxt}. Time goes up first on a hold; load stays put so only one thing changes.`,
           next: `At ${ex.hi} seconds the progression switches to added load and the time resets to ${ex.lo}.`
         }, flags: ['progress_time'], trace, ready, confidence: 'high' };
+    }
+    if (!addLoadAtCap) {
+      return { action: 'hold', prescription: buildPrescription(ex, base, { lo: ex.hi, hi: ex.hi }, ex.sets, mod),
+        explain: { what: `Holding at the top of the range (${ex.hi}).`,
+          why: `You are at ${ex.hi} on every set and this exercise does not add load automatically.`,
+          next: 'Raise the range, add load yourself, or change the method in this exercise\'s settings.' },
+        flags: ['reps_cap'], trace, ready, confidence: 'high' };
     }
     const nl = roundToIncrement((base || 0) + inc, inc);
     trace.push({ rule: 'progress.time.cap', detail: `time cap, load -> ${nl}` });
@@ -616,7 +1136,7 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
   }
 
   // Default: load-based (including carries, where distance is fixed).
-  const smallest = incrementFor(ex, profile);
+  const smallest = ev.settings ? ev.settings.increments[0] : incrementFor(ex, profile);
   const rawInc = capJump(base, smallest, profile);
   if (rawInc === 0) {
     // The smallest weight this gym can add is a bigger jump than the cap allows.
@@ -624,7 +1144,7 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
     const pct = (profile && profile.maxLoadJumpPct) || TUNING.maxJumpPctDefault;
     const asPct = base ? ((smallest / base) * 100).toFixed(0) : '?';
     const atTop = (ev.sum.repsAtWorkingWeight[0] || 0) >= ex.hi;
-    const noAltDimension = ex.lo === ex.hi;   // carries: distance is fixed, nothing else to move
+    const noAltDimension = ex.lo === ex.hi && !(ev.settings && ev.settings.strictLimit);   // carries: distance is fixed, nothing else to move
     if (noAltDimension) {
       // Blocking here would stall the exercise permanently, so the increment is
       // allowed and the overshoot is stated rather than hidden.
@@ -698,6 +1218,338 @@ function substituteDecision(ex, base, mod, trace, ready, because) {
   };
 }
 
+
+/* ============================================================================
+   DOUBLE PROGRESSION: the earned step
+   ========================================================================== */
+function doubleProgress(ex, base, mod, trace, ready, ev) {
+  const s = ev.settings;
+  const sets = s.sets;
+  const reserveTxt = ev.reserve == null ? '' : ` with ${ev.reserve} clean rep${ev.reserve === 1 ? '' : 's'} in reserve`;
+  const effortTxt = ev.effort ? ev.effort.label.toLowerCase() : 'manageable';
+  const did = `all ${sets} working sets at ${s.repMax} ${mod.unit}`;
+
+  if (ex.modality === 'assisted') {
+    const dec = s.increments[0];
+    const next = Math.max(0, r2(base - dec));
+    trace.push({ rule: 'progress.assist', detail: `assistance ${base} -> ${next}` });
+    return { action: 'progress', prescription: buildPrescription(ex, next, targetReps(ex, 'low'), ex.sets, mod),
+      explain: {
+        what: `Assistance down from ${base} kg to ${next} kg; reps reset to ${s.repMin}.`,
+        why: `You completed ${did} with ${base} kg of assistance. It came back ${effortTxt}${reserveTxt}, and technique stayed controlled. On an assisted movement, less help is the progression.`,
+        next: next === 0 ? 'That is the full unassisted movement — the next step is the unassisted variant.'
+                         : `Build back up to ${s.repMax} reps at ${next} kg of assistance, then it drops again.`
+      }, flags: ['progress_assist'], trace, ready, confidence: 'high' };
+  }
+
+  const step = pickIncrease(base, s);
+  if (!step.allowed) {
+    const asPct = step.asPct == null ? '?' : step.asPct.toFixed(0);
+    trace.push({ rule: 'progress.load.blocked', detail: `smallest increment ${step.smallest}kg = ${asPct}% of ${base}kg, limit ${step.pct}%` });
+    return { action: 'hold', prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
+      explain: {
+        what: `Staying at ${fmtLoad(base, ex)}: the load cannot move yet.`,
+        why: `You completed ${did}, which earns an increase, but the smallest increment you have for this exercise is ${step.smallest} kg, ` +
+             `which is ${asPct}% of ${base} kg and over your ${step.pct}% progression limit. Rather than quietly making a jump that big, the load holds.`,
+        next: `To move the load you need a smaller increment (micro-plates, a lighter implement) or a higher limit. Change either in this exercise's progression settings. ` +
+              `Until then repeat ${fmtLoad(base, ex)} to the same standard.`
+      }, flags: ['increment_blocked'], trace, ready, confidence: 'high' };
+  }
+  const delta = r2(step.next - base);
+  trace.push({ rule: 'progress.load', detail: `${base} -> ${step.next} (+${delta})` });
+  return { action: 'progress', prescription: buildPrescription(ex, step.next, targetReps(ex, 'low'), ex.sets, mod),
+    explain: {
+      what: `Load up ${delta} kg to ${step.next} kg; reps reset to ${s.repMin}.`,
+      why: `You completed ${did} at ${base} kg. It came back ${effortTxt}${reserveTxt}, and technique stayed controlled. That combination, not the reps on their own, is what earns the increase.`,
+      next: `Build from ${s.repMin} back towards ${s.repMax} on every set at ${step.next} kg. Sets stay at ${sets}: load and sets never go up together.`
+    }, flags: ['progress_load'], trace, ready, confidence: 'high' };
+}
+
+/* Manual: the app reports, the user decides. Nothing here changes the load. */
+function manualDecision(ex, base, last, settings, gap, trace, ready, mod) {
+  const reps = last && last.entry ? evaluateEntry(last.entry, settings, ex).atLoadReps : [];
+  const note = gap != null && gap > TUNING.staleDays
+    ? ` It has been ${gap} days since you last did this, so consider easing back yourself.` : '';
+  trace.push({ rule: 'manual', detail: 'progression method is manual' });
+  return {
+    action: 'hold',
+    prescription: Object.assign(buildPrescription(ex, base, targetReps(ex, 'range'), ex.sets, mod),
+      { setTargets: reps.length ? buildSetTargets(reps, settings.sets, settings.repMin, settings.repMax, 'repeat', 1)
+                                : Array(settings.sets).fill(settings.repMin) }),
+    explain: {
+      what: `Manual progression: ${fmtLoad(base, ex)}, ${settings.sets} × ${settings.repMin}–${settings.repMax}.`,
+      why: 'You set this exercise to manual, so the app does not raise, lower or reset the load for you. It repeats what you did last time.' + note,
+      next: 'Change the load or reps yourself when you are ready. Your change is recorded as yours, separate from anything the app would have suggested.'
+    },
+    flags: ['manual'], trace, ready, confidence: 'n/a'
+  };
+}
+
+/* ============================================================================
+   ATTACHING TARGETS AND THE PROGRESSION SUMMARY TO A DECISION
+   ========================================================================== */
+function deriveSetTargets(d, settings, ex, evd) {
+  const p = d.prescription;
+  if (!p) return null;
+  const n = p.sets, lo = settings.repMin, hi = settings.repMax, st = settings.repStep;
+  const f = d.flags || [];
+  if (settings.method !== 'double') return Array(n).fill(Math.max(1, p.repsHigh));
+  if (d.action === 'calibrate') return Array(n).fill(Math.round((lo + hi) / 2));
+  if (d.action === 'progress') return Array(n).fill(lo);                       // reset after an increase
+  if (d.action === 'reduce') return Array(n).fill(f.includes('regression') ? lo : Math.max(lo, Math.min(hi, p.repsHigh)));
+  if (d.action === 'deload' || d.action === 'substitute') return Array(n).fill(Math.max(lo, Math.min(hi, p.repsHigh)));
+  const prev = evd ? evd.atLoadReps : [];
+  return buildSetTargets(prev, n, lo, hi, f.includes('building_reps') ? 'build' : 'repeat', st);
+}
+function backoffFor(prescription, settings, ex, profile) {
+  if (!settings.backoff || !prescription || prescription.load == null || !prescription.load) return null;
+  const inc = settings.increments[0];
+  const load = Math.max(0, roundToIncrement(prescription.load * settings.backoff.pct / 100, inc));
+  return { sets: settings.backoff.sets, pct: settings.backoff.pct, load, reps: settings.repMax };
+}
+
+function decide(ctx) {
+  const d = decideCore(ctx);
+  return attachProgression(ctx, d);
+}
+function attachProgression(ctx, d) {
+  const settings = resolveSettings(ctx.state, ctx.ex);
+  const ex = effectiveEx(ctx.ex, settings);
+  const last = ctx.last || null;
+  const evd = last && last.entry ? evaluateEntry(last.entry, settings, ex) : null;
+  const p = d.prescription;
+  if (p) {
+    if (!p.setTargets) p.setTargets = deriveSetTargets(d, settings, ex, evd);
+    const bo = backoffFor(p, settings, ex, ctx.state.profile);
+    if (bo) p.backoff = bo;
+  }
+  d.progression = buildProgressionInfo(ctx, d, settings, ex, evd);
+  return d;
+}
+
+function _fmtReps(list) { return list.join(' / '); }
+function _loadShort(w, ex) {
+  if (ex.modality === 'assisted') return `${w} kg assist`;
+  if (ex.modality === 'bodyweight_reps' && !w) return 'BW';
+  return `${w} kg`;
+}
+function buildProgressionInfo(ctx, d, settings, ex, evd) {
+  const p = d.prescription;
+  const f = d.flags || [];
+  const meth = PROGRESSION_METHODS[settings.method];
+  const unit = (MODALITY[ex.modality] || MODALITY.load_reps).unit;
+  const unitTxt = unit === 'reps' ? '' : ' ' + unit;
+  const range = settings.repMin === settings.repMax ? `${settings.repMin}` : `${settings.repMin}–${settings.repMax}`;
+  const info = {
+    method: settings.method, methodLabel: meth.label, unit,
+    sets: settings.sets, repMin: settings.repMin, repMax: settings.repMax,
+    qualifying: { have: 0, need: settings.qualifyingSessions },
+    status: 'held', requirements: [], nextIncrease: null,
+    lastReps: null, lastLoad: null, lastSets: null,
+    load: p ? p.load : null, setTargets: p ? p.setTargets : null,
+    header: null, lastText: null, todayText: null, nextText: null,
+    heldBy: null
+  };
+
+  /* status */
+  if (d.paused) info.status = 'paused';
+  else if (d.action === 'calibrate') info.status = 'calibrating';
+  else if (f.includes('manual')) info.status = 'manual';
+  else if (d.action === 'deload') info.status = 'deload';
+  else if (d.action === 'substitute') info.status = 'plateau';
+  else if (d.action === 'reduce') info.status = 'reduced';
+  else if (f.includes('progress_load') || f.includes('progress_assist')) info.status = 'earned';
+  else if (f.includes('progress_reps') || f.includes('progress_time')) info.status = 'building';
+  else if (f.includes('increment_blocked')) info.status = 'blocked';
+  else if (f.includes('building_reps')) info.status = 'building';
+  else info.status = 'held';
+  const hb = ['needed_less','maximal_effort','unknown_feedback','low_readiness','high_workload','technique','qualifying_wait','post_deload','pain','plan_hold','rebase']
+    .find(x => f.includes(x));
+  info.heldBy = hb || null;
+
+  if (!p) {                                         // paused: nothing is prescribed
+    info.header = `${ex.short || ex.name} paused`;
+    info.nextText = d.explain ? d.explain.next : '';
+    return info;
+  }
+
+  const loadTxt = p.load != null ? fmtLoad(p.load, ex) : null;
+  info.header = loadTxt ? `${loadTxt} · ${settings.sets} × ${range}${unitTxt}` : `Choose your load · ${settings.sets} × ${range}${unitTxt}`;
+
+  /* last time */
+  if (evd && evd.performed) {
+    info.lastReps = evd.allReps.slice();
+    info.lastLoad = evd.baseline;
+    const doneSets = _doneTop(ctx.last.entry);
+    info.lastSets = doneSets.map(s => ({ w: s.actualWeight, r: s.actualReps }));
+    const sameLoad = new Set(info.lastSets.map(x => x.w)).size === 1;
+    info.lastText = sameLoad
+      ? `Last time: ${_fmtReps(info.lastSets.map(x => x.r))}${p.load !== info.lastSets[0].w && p.load != null ? ' at ' + fmtLoad(info.lastSets[0].w, ex) : ''}`
+      : `Last time: ${info.lastSets.map(x => `${x.r} × ${_loadShort(x.w, ex)}`).join(' / ')}`;
+  } else info.lastText = 'Last time: no comparable session yet';
+  if (p.setTargets) info.todayText = `Today: ${_fmtReps(p.setTargets)}`;
+
+  /* progress towards the next increase (double progression) */
+  const nextLoadBase = p.load;
+  if (settings.method === 'double') {
+    const streak = (evd && evd.baseline != null && ctx.state)
+      ? qualifyingStreak(ctx.state, ctx.variantId || ctx.ex.id, settings, ex, evd.baseline) : 0;
+    info.qualifying.have = streak;
+    info.setsAtTop = evd ? { have: Math.min(evd.topCount, settings.sets), need: settings.sets } : { have: 0, need: settings.sets };
+    const Ltxt = loadTxt || 'the working load';
+    const justEarned = info.status === 'earned';
+    const mk = (id, text, met) => ({ id, text, met });
+    const fresh = justEarned;      // a new load starts a fresh cycle
+    const known = evd && evd.sufficient;
+    const effLabel = EFFORT_SCALE[settings.maxEffort].label.toLowerCase();
+    info.requirements = [
+      mk('sets', `Complete all ${settings.sets} working sets at ${Ltxt}`, fresh ? false : (evd ? evd.setsOk : false)),
+      mk('reps', `Reach ${settings.repMax} ${unit === 'reps' ? 'reps' : unit} on every one of them`, fresh ? false : (evd ? evd.repsOk : false)),
+      mk('effort', `Effort no higher than ${effLabel}, with at least ${settings.minReserve} clean rep${settings.minReserve === 1 ? '' : 's'} in reserve`,
+         fresh || !evd ? null : (known ? !(evd.blocks.includes('maximal') || evd.blocks.includes('effort') || evd.blocks.includes('reserve')) : null)),
+      mk('technique', 'Technique stays controlled',
+         fresh || !evd ? null : (evd.tech === 'deteriorating' ? false : (evd.tech === 'controlled' ? true : null))),
+      mk('capacity', 'You did not need less than the prescribed work',
+         fresh || !evd ? null : (evd.cap === 'needed_less' ? false : (evd.cap ? true : null))),
+      mk('pain', 'No pain reported and no open pain concern',
+         fresh || !evd ? null : (evd.pain || openConcernFor(ctx.state, ctx.variantId || ctx.ex.id) ? false : true))
+    ];
+    if (settings.qualifyingSessions > 1) {
+      info.requirements.push(mk('sessions',
+        `${settings.qualifyingSessions} qualifying sessions in a row (${fresh ? 0 : streak} so far)`, fresh ? false : streak >= settings.qualifyingSessions));
+    }
+    /* proposed next load */
+    let ni;
+    if (ex.modality === 'assisted') {
+      const inc = settings.increments[0];
+      const to = Math.max(0, r2((nextLoadBase || 0) - inc));
+      ni = { allowed: nextLoadBase != null && nextLoadBase > 0, to, delta: r2(to - (nextLoadBase || 0)), repsAfter: settings.repMin, assisted: true };
+    } else if (nextLoadBase != null) {
+      const pk = pickIncrease(nextLoadBase, settings);
+      ni = pk.allowed ? { allowed: true, to: pk.next, delta: pk.inc, repsAfter: settings.repMin }
+                      : { allowed: false, to: null, delta: null, repsAfter: settings.repMin,
+                          blockedBecause: `the smallest increment (${pk.smallest} kg) is over your ${pk.pct}% progression limit` };
+    } else ni = null;
+    info.nextIncrease = ni;
+
+    const need = [
+      `complete all ${settings.sets} sets at ${settings.repMax}${unit === 'reps' ? ' reps' : unitTxt} with controlled technique, ` +
+      `at least ${settings.minReserve} clean rep${settings.minReserve === 1 ? '' : 's'} in reserve and effort no higher than ${effLabel}`
+    ];
+    if (justEarned) {
+      info.nextText = `Reps reset to ${settings.repMin} on all ${settings.sets} sets. ` +
+        `The next increase after that needs all ${settings.sets} sets at ${settings.repMax}${unit === 'reps' ? ' reps' : unitTxt} again.`;
+    } else if (info.status === 'blocked') {
+      info.nextText = `Weight increase earned but not possible: ${ni && ni.blockedBecause ? ni.blockedBecause : 'no available increment fits the limit'}. The load holds.`;
+    } else if (info.status === 'building' || info.status === 'held' || info.status === 'reduced' || info.status === 'calibrating') {
+      const after = ni && ni.allowed ? ` Then ${fmtLoad(ni.to, ex)} × ${range}, reps reset to ${settings.repMin}.`
+                  : ni && !ni.allowed && !ni.assisted ? ` The increase would not be possible yet: ${ni.blockedBecause}.` : '';
+      info.nextText = `Next weight increase: ${need[0]}.` +
+        (settings.qualifyingSessions > 1 ? ` Needed on ${settings.qualifyingSessions} sessions in a row (${streak} so far).` : '') + after;
+    } else if (d.explain) info.nextText = d.explain.next;
+  } else if (settings.method === 'manual') {
+    info.nextText = 'Manual progression: the app does not change this load. You set it.';
+  } else {
+    info.nextText = d.explain ? d.explain.next : '';
+  }
+  return info;
+}
+
+/* ============================================================================
+   ACCEPT / HOLD / EDIT: manual choices are recorded SEPARATELY from the
+   automatic recommendation. entry.decision is never rewritten; the choice and
+   what was actually applied live in entry.progressionChoice. Only sets that
+   have not been performed are touched.
+   ========================================================================== */
+function holdAlternative(decision) {
+  const info = decision && decision.progression;
+  const p = decision && decision.prescription;
+  if (!p || !info || info.lastLoad == null) return null;
+  const reps = info.lastReps && info.lastReps.length ? info.lastReps : (p.setTargets || []);
+  const n = p.sets;
+  const targets = [];
+  for (let i = 0; i < n; i++) {
+    const r = i < reps.length ? reps[i] : (reps.length ? Math.min(...reps) : info.repMin);
+    targets.push(Math.max(info.repMin, Math.min(info.repMax, r)));
+  }
+  return { action: 'hold', load: info.lastLoad, setTargets: targets, sets: n };
+}
+/* One dimension at a time: a manual edit may not raise the load AND add sets. */
+function checkManualEdit(decision, edit, settings) {
+  const problems = [], warnings = [];
+  const info = decision && decision.progression;
+  const e = edit || {};
+  if (e.load == null || !Number.isFinite(Number(e.load)) || Number(e.load) < 0) problems.push('Enter a load of 0 or more.');
+  const t = Array.isArray(e.setTargets) ? e.setTargets.map(Number) : [];
+  if (!t.length || t.length > 10 || t.some(r => !Number.isFinite(r) || r < 1 || r > 600)) problems.push('Enter a rep target for each set, from 1 to 10 sets.');
+  if (problems.length) return { ok: false, problems, warnings };
+  const load = Number(e.load);
+  const lastLoad = info && info.lastLoad != null ? info.lastLoad : null;
+  const prescribedSets = settings ? settings.sets : (decision.prescription && decision.prescription.sets);
+  const raised = lastLoad != null && load > lastLoad + 1e-9;
+  if (raised && t.length > prescribedSets) problems.push('Do not raise the load and add sets in the same step. Change one, then the other next time.');
+  if (settings && lastLoad && raised) {
+    const pct = ((load - lastLoad) / lastLoad) * 100;
+    if (pct > settings.maxJumpPct + 1e-9) warnings.push(`That is a ${pct.toFixed(1)}% jump, over your ${settings.maxJumpPct}% progression limit. It will be recorded as a manual change.`);
+  }
+  if (settings && t.some(r => r > settings.repMax)) warnings.push(`A target is above the top of your range (${settings.repMax}).`);
+  return { ok: problems.length === 0, problems, warnings };
+}
+function _blankSet(w, r, role) {
+  return { plannedWeight: w, plannedReps: r, actualWeight: null, actualReps: null,
+           status: 'pending', warmup: false, role: role || 'working', ts: null };
+}
+function applyProgressionChoice(entry, choice, edit, settings, nowMs) {
+  const d = entry && entry.decision;
+  if (!d || !d.prescription) return { ok: false, problems: ['There is no prescription to change.'] };
+  const rec = { action: d.action, load: d.prescription.load,
+                setTargets: (d.prescription.setTargets || []).slice(), sets: d.prescription.sets };
+  let applied, warnings = [];
+  if (choice === 'accept') applied = rec;
+  else if (choice === 'hold') {
+    applied = holdAlternative(d);
+    if (!applied) return { ok: false, problems: ['There is no earlier load to hold at.'] };
+  } else if (choice === 'edit') {
+    const chk = checkManualEdit(d, edit, settings);
+    if (!chk.ok) return { ok: false, problems: chk.problems };
+    warnings = chk.warnings;
+    applied = { load: Number(edit.load), setTargets: edit.setTargets.map(Number), sets: edit.setTargets.length };
+  } else return { ok: false, problems: ['Unknown choice.'] };
+
+  /* touch pending top sets only; performed sets and back-off sets are left alone */
+  const top = (entry.sets || []).filter(s => !s.warmup && s.role !== 'backoff');
+  let ti = 0;
+  top.forEach(s => {
+    if (s.status === 'pending' && ti < applied.sets) {
+      s.plannedWeight = applied.load;
+      s.plannedReps = applied.setTargets[ti];
+    }
+    ti++;
+  });
+  for (let i = top.length; i < applied.sets; i++) {            // more sets requested
+    const ns = _blankSet(applied.load, applied.setTargets[i]);
+    const firstBackoff = (entry.sets || []).findIndex(s => s.role === 'backoff');
+    if (firstBackoff >= 0) entry.sets.splice(firstBackoff, 0, ns); else entry.sets.push(ns);
+  }
+  if (top.length > applied.sets) {                              // fewer: drop only unperformed ones
+    let drop = top.length - applied.sets;
+    for (let i = entry.sets.length - 1; i >= 0 && drop > 0; i--) {
+      const s = entry.sets[i];
+      if (!s.warmup && s.role !== 'backoff' && s.status === 'pending') { entry.sets.splice(i, 1); drop--; }
+    }
+  }
+  if (settings && settings.backoff) {
+    const inc = settings.increments[0];
+    const bl = Math.max(0, roundToIncrement(applied.load * settings.backoff.pct / 100, inc));
+    (entry.sets || []).forEach(s => { if (s.role === 'backoff' && s.status === 'pending') s.plannedWeight = bl; });
+  }
+  entry.progressionChoice = {
+    chosen: choice === 'accept' ? 'accepted' : choice === 'hold' ? 'held' : 'edited',
+    recommended: rec, applied, warnings, at: nowMs || Date.now()
+  };
+  return { ok: true, applied, warnings, choice: entry.progressionChoice.chosen };
+}
+
 /* -------------------------------------------------------------- helpers */
 function baselineFrom(last, ex, inc) {
   if (!last || !last.summary) return null;
@@ -735,7 +1587,7 @@ function fmtLoad(w, ex) {
 }
 function finish(d) {
   d.at = Date.now();
-  d.engineVersion = 3;
+  d.engineVersion = 4;
   return d;
 }
 
@@ -756,7 +1608,11 @@ function proposeDeload(state, todayStr) {
   sessions.slice(-12).forEach(s => s.entries.forEach(e => {
     if (seen.has(e.variantId)) return;
     seen.add(e.variantId);
-    if (consecutiveHolds(state, e.variantId) >= TUNING.plateauHolds) stalled.push(e.variantId);
+    const exd = (state._exIndex || {})[e.variantId];
+    if (exd) {
+      const st = resolveSettings(state, exd);
+      if (detectPlateau(state, e.variantId, st, effectiveEx(exd, st), todayStr)) stalled.push(e.variantId);
+    }
   }));
   const dueByTime = weeksTrained - lastDeload >= every;
   if (!dueByTime && stalled.length < 3) return null;
@@ -1031,8 +1887,14 @@ const COACHING_ASSUMPTIONS = [
   { id: 'weekly_sets_22', claim: 'More than 22 working sets per muscle per week caps progression.',
     basis: 'Upper end of commonly cited hypertrophy volume ranges; individual tolerance varies.',
     review: 'S&C coach' },
-  { id: 'plateau_3', claim: 'Three consecutive holds triggers a substitution suggestion.',
-    basis: 'Arbitrary but conservative threshold.', review: 'S&C coach' },
+  { id: 'plateau_4', claim: 'A plateau is four comparable sessions over at least 14 days with no improvement in load or reps at that load (under 1% better than before), and feedback recorded on at least three of them.',
+    basis: 'Judgement call. Reps gained at the same weight count as progress, so an unchanged load is never a stall on its own.', review: 'S&C coach' },
+  { id: 'double_step', claim: 'Each set\'s rep target moves up at most one rep per session, from what that set did last time at the same load.',
+    basis: 'Conservative so the target is achievable. A faster step would reach the top of the range sooner but is not backed by a trial on this user.', review: 'S&C coach' },
+  { id: 'effort_cap', claim: 'The default highest effort that still allows a load increase is "near limit", with two clean reps in reserve.',
+    basis: 'Matches the earlier fixed rule. Both are now set per exercise.', review: 'S&C coach' },
+  { id: 'backoff_85', claim: 'A back-off prescription defaults to 85% of the top load, and its reps never count towards qualifying the top load.',
+    basis: 'Common practice; the percentage is chosen per exercise.', review: 'S&C coach' },
   { id: 'e1rm_epley', claim: 'Estimated 1RM uses the Epley formula.',
     basis: 'Published formula; accuracy degrades above about 10 reps.', review: 'S&C coach' },
   { id: 'pain_sev_5', claim: 'Pain rated 5+ pauses the exercise pending review.',
@@ -1058,6 +1920,9 @@ if (typeof module !== 'undefined' && module.exports) {
     acceptDeload, dismissDeload, inDeload, closeDeloadIfDue,
     buildProgram, groupOf, equipmentAvailable, GOAL_PRESCRIPTION, EXPERIENCE_SETS,
     painIsConcerning, concerningReasons, CONCERNING_PAIN_FLAGS,
-    openPainConcern, resolvePainConcern, openConcernFor, syncPainConcerns
+    openPainConcern, resolvePainConcern, openConcernFor, syncPainConcerns,
+    PROGRESSION_METHODS, defaultMethodFor, resolveSettings, normaliseSettings, saveExerciseSettings,
+    resetExerciseSettings, effectiveEx, evaluateEntry, qualifyingStreak, detectPlateau, pickIncrease,
+    buildSetTargets, holdAlternative, checkManualEdit, applyProgressionChoice, perfScore
   };
 }

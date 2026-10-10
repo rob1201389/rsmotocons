@@ -15,7 +15,10 @@ backend, no account, no tracking.
 | `figure.js` | Parametric figure engine that draws and animates the demonstrations |
 | `lifts.js` / `stretches.js` | Pose definitions: 41 exercise animations, 14 mobility |
 | `sw.js` | Service worker (offline) |
-| `tests.js` / `uitest.js` | 73 logic tests, 49 UI tests |
+| `tests.js` / `uitest.js` / `regression.js` | Logic, UI and regression suites |
+| `DOUBLE-PROGRESSION.md` | How double progression works and where each rule lives |
+| `DOUBLE-PROGRESSION-EXAMPLES.md` | Worked examples generated from the real engine |
+| `../test/` | Double progression suites and `run-all.sh` |
 | `BENCHMARK.md` | Competitive matrix and prioritised gap analysis |
 | `MIGRATION.md` | Schema v1 → v3 migration notes |
 | `ASSETS.md` | Coverage checklist, asset manifest, production brief |

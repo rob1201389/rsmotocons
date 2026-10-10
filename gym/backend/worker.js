@@ -15,7 +15,7 @@ export default {
     }
     try {
     const db = d1Db(env.DB);
-    const res = await handle(request, { db, env, ip: request.headers.get('cf-connecting-ip') });
+    const res = await handle(request, { db, env, ip: request.headers.get('cf-connecting-ip'), trustIp: true });
     const out = new Response(res.body, res);
     out.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
     out.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');

@@ -1,0 +1,54 @@
+/* Section views. Uses the tokens in index.html (--surface, --line, --accent ...). */
+.tabs .sec{display:none}
+@media(min-width:900px){ .tabs .sec{display:flex} .tabs .more{display:none} }
+@media(max-width:899px){ .tabs button{font-size:.68rem;padding:6px 2px} }
+.vwrap{flex-wrap:wrap}
+.vlink{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;width:100%;text-align:left;background:var(--surface);color:var(--text);
+  border:1px solid var(--line);border-radius:var(--r-m);padding:14px 16px;min-height:var(--tap);cursor:pointer;margin-top:8px}
+.vlink b{font-size:1rem}.vlink .muted{grid-column:1;font-size:.84rem}.vlink .chev{grid-row:1/3;grid-column:2;font-size:1.3rem}
+.vlink:hover{background:var(--surface-2)}.vlink:disabled{opacity:.5;cursor:not-allowed}
+.vlist{margin:6px 0 10px;padding-left:18px;font-size:.9rem;line-height:1.5}.vlist li{margin:4px 0}
+.vlist .dim{font-size:.86rem}
+.veffect{font-size:.8rem;margin:6px 0 12px;line-height:1.45}
+.vfield{display:block;margin:12px 0 4px}.vlabel{display:block;font-size:.8rem;color:var(--muted);margin-bottom:4px;font-weight:600}
+.vhint{display:block;font-size:.76rem;margin-top:4px}
+.vfield input,.vfield select,.vselect,.vtext,.vform input[type=text],.vform input[type=time],.vform input[type=number],.vform input[type=date]{
+  width:100%;min-height:var(--tap);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-s);color:var(--text);padding:10px 12px;font:inherit}
+.vtext{min-height:120px;resize:vertical;line-height:1.5}
+.vfield input:focus,.vselect:focus,.vtext:focus,.vform input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.vform .opts{margin:6px 0 4px}.vform .eyebrow{display:block;margin:16px 0 4px}
+.vcheck{display:flex;gap:8px;align-items:flex-start;font-size:.9rem;margin:10px 0;cursor:pointer}.vcheck input{width:20px;height:20px;margin-top:2px}
+.vnote{padding:10px 0;border-top:1px solid var(--line)}.vnote:first-of-type{border-top:0}
+.vbar{height:8px;background:var(--surface-3);border-radius:999px;overflow:hidden;margin:6px 0}.vbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width var(--dur) var(--ease)}
+.vms{padding:10px 0;border-top:1px solid var(--line)}.vms:first-of-type{border-top:0}
+.vcal{display:grid;gap:6px;margin-top:10px}
+.vslot{display:grid;grid-template-columns:54px 28px 1fr auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer;min-height:var(--tap);background:var(--surface-2)}
+.vslot:focus-visible{outline:2px solid var(--accent)}
+.vslot.today{border-color:var(--accent);border-width:2px}
+.vslot .vd{display:flex;flex-direction:column;font-size:.8rem;line-height:1.2}.vslot .vd b{font-size:.9rem}
+.vslot .vk{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-size:.72rem;font-weight:700;background:var(--surface-3);color:var(--muted)}
+.vslot.training .vk{background:var(--accent);color:var(--accent-ink)}
+.vslot.completed .vk{background:var(--accent);color:var(--accent-ink)}
+.vslot.rest,.vslot.recovery{opacity:.9}
+.vslot .vt{display:flex;flex-direction:column;min-width:0}.vslot .vt .dim{font-size:.78rem}
+.vslot.missed,.vslot.skipped{border-style:dashed}
+.vbeforeafter{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin:12px 0}
+.vbeforeafter>div{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:10px;display:flex;flex-direction:column}
+.vbeforeafter b{font-family:var(--mono);font-size:1.2rem}.vbeforeafter .arrow{border:0;background:none;font-size:1.4rem}
+.vver{border:1px solid var(--line);border-radius:var(--r-s);padding:12px;margin-top:10px}.vver.current{border-color:var(--accent)}
+.vprop{border:1px solid var(--line);border-radius:var(--r-s);padding:12px;background:var(--surface-2)}.vprop.safeguard{border-color:var(--alert)}
+.vrow{margin:8px 0}.vai .vlist{margin-top:2px}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line-strong);border-top-color:var(--accent);border-radius:50%;animation:vspin 1s linear infinite;vertical-align:-2px}
+@keyframes vspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+.schedule div.miss{border-style:dashed;opacity:.7}
+.btn.danger{background:var(--alert);border-color:var(--alert);color:#fff}
+.vtimer{font-family:var(--mono);font-size:2.4rem;font-weight:700;text-align:center;margin:10px 0}
+.vcards{display:grid;gap:10px;grid-template-columns:1fr}
+@media(min-width:560px){.vcards{grid-template-columns:1fr 1fr}}
+.vwo{display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);text-align:left;color:var(--text);cursor:pointer;min-height:var(--tap)}
+.vwo:hover{background:var(--surface-2)}.vwo .tags{display:flex;gap:6px;flex-wrap:wrap}
+.vtag{font-family:var(--mono);font-size:.66rem;padding:2px 7px;border:1px solid var(--line-strong);border-radius:999px;color:var(--muted)}
+.vfilter{display:grid;gap:8px;grid-template-columns:1fr 1fr}
+@media(min-width:620px){.vfilter{grid-template-columns:repeat(4,1fr)}}
+.tabs .navadmin{border-top:1px solid var(--line);margin-top:8px}

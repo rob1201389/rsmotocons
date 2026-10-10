@@ -70,8 +70,13 @@ Features gated independently per user: `training`, `library`, `nutrition`,
 | POST | `/api/auth/login` | anyone |
 | GET | `/api/auth/session` | anyone (returns `authenticated:false` when not) |
 | POST | `/api/auth/logout` | signed in |
-| POST | `/api/auth/password` | signed in |
-| GET | `/api/auth/me` | signed in |
+| POST | `/api/auth/password` | signed in (also pending) |
+| GET | `/api/auth/me` | signed in (also pending) |
+| POST | `/api/auth/signup` | anyone (rate limited, honeypot) |
+| POST | `/api/auth/verify` | anyone with an emailed token |
+| POST | `/api/auth/resend-verification` | signed in (also pending), rate limited |
+| GET | `/api/auth/account-status` | signed in (also pending) |
+| POST | `/api/auth/forgot` · `/api/auth/reset` | anyone (generic responses, single-use token) |
 | GET/PUT | `/api/state` | own data, needs `training` |
 | GET | `/api/users/:id/state` | self, or an **assigned** reviewer (audited) |
 | POST | `/api/import/preview` · `/api/import/commit` | own data |
@@ -81,9 +86,23 @@ Features gated independently per user: `training`, `library`, `nutrition`,
 | GET/POST | `/api/admin/users` · PATCH `/api/admin/users/:id` | admin (owner for roles) |
 | POST | `/api/admin/assign` | admin |
 | GET | `/api/admin/audit` | admin |
+| GET | `/api/admin/requests?status=` | admin (sign-up queue) |
+| POST | `/api/admin/requests/:id/decision` · `/verify-email` | admin (owner to grant admin) |
+| GET/PUT | `/api/admin/users/:id/note` | admin, private notes |
+| POST | `/api/ai/weekly-review` | active user with `reviews` (503 until `ANTHROPIC_API_KEY` is set) |
+| GET/POST | `/api/weekly-submissions` · PATCH `/api/weekly-submissions/:id` | member sends to assigned coach, coach decides |
+
+A **pending** account (signed up, not yet approved) can sign in but only reaches
+`/api/auth/session`, `/me`, `/logout`, `/password`, `/resend-verification` and
+`/account-status`. Everything else answers 403 `{code:'pending'}` from one guard
+in `handle()`. Full flows and environment variables: `docs/BACKEND-AUTH.md`.
 
 ## Tests
 
 ```bash
-node test/api.test.js    # 45 tests, real HTTP, real database
+node test/api.test.js      # core auth, RBAC, state, reviews
+node test/signup.test.js   # sign-up, verification, approval, restricted sessions, reset, mail
+node test/ai.test.js       # AI weekly review (Anthropic faked via the injectable fetch)
+node test/weekly.test.js   # weekly submissions to a coach
+# all use real HTTP and a real database
 ```

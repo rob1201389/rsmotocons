@@ -215,6 +215,39 @@ section[hidden]{display:none}
 .mediabar{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap}
 
 /* ------------------------------ sheet ----------------------------------- */
+
+/* ------------------------- progression panel --------------------------- */
+.prog{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:11px;margin:10px 0}
+.prog .p-head{font-family:var(--mono);font-weight:700;font-size:1.05rem}
+.prog .p-line{font-size:.88rem;margin-top:4px;color:var(--muted)}
+.prog .p-line b{color:var(--text)}
+.prog .meter{display:flex;gap:5px;margin:10px 0 4px}
+.prog .meter i{flex:1;height:8px;border-radius:99px;background:var(--line-strong)}
+.prog .meter i.on{background:var(--accent)}
+.prog .meter-l{font-size:.78rem;color:var(--muted)}
+.prog ul.req{list-style:none;margin:8px 0 0;padding:0}
+.prog ul.req li{display:flex;gap:8px;font-size:.84rem;padding:3px 0;line-height:1.35}
+.prog ul.req .ic{flex:0 0 1.2em;text-align:center;font-weight:700}
+.prog ul.req .met .ic{color:var(--accent)}
+.prog ul.req .unmet .ic{color:var(--alert)}
+.prog ul.req .unknown .ic{color:var(--muted)}
+.prog .p-next{margin-top:8px;font-size:.86rem;line-height:1.45}
+.prog .p-prev{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line-strong)}
+.prog .p-prev .t{font-weight:600}
+.prog .choice{margin-top:6px;font-size:.82rem;color:var(--muted)}
+.setrow .sn.bo{font-size:.62rem;letter-spacing:.05em}
+.ps-grid{display:grid;gap:12px;margin-top:10px}
+.ps-grid .fld2 label{display:block;font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;color:var(--muted);margin-bottom:4px}
+.ps-grid .fld2 input[type=text],.ps-grid .fld2 input[type=number],.ps-grid .fld2 select{
+  width:100%;min-height:var(--tap);background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong);
+  border-radius:var(--r-s);padding:9px 11px;font-size:1rem}
+.ps-grid .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ps-grid .hint{font-size:.76rem;color:var(--dim);margin-top:3px;line-height:1.35}
+.ps-grid .chk{display:flex;gap:10px;align-items:flex-start;font-size:.88rem}
+.ps-grid .chk input{margin-top:3px;width:20px;height:20px}
+.ps-errs{margin:10px 0 0;padding:10px;border-radius:var(--r-s);background:var(--alert-soft);border:1px solid var(--alert);font-size:.84rem}
+.ps-errs ul{margin:4px 0 0 18px;padding:0}
+
 .sheet{position:fixed;inset:0;z-index:70;display:none}
 .sheet.on{display:block}
 .sheet .scrim{position:absolute;inset:0;background:rgba(0,0,0,.6)}
@@ -304,81 +337,370 @@ section[hidden]{display:none}
   *{animation-duration:.001ms!important;transition-duration:.001ms!important}
 }
 :root[data-motion="off"] *{animation-duration:.001ms!important;transition-duration:.001ms!important}
+
+/* ===================== auth: welcome, dialog, status page ==================
+   Uses only the tokens above, so light and dark follow the rest of the app. */
+body.locked{overflow:hidden;padding:0}
+body.locked>*:not(#authGate){display:none!important}
+.authgate{position:fixed;inset:0;z-index:200;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch}
+.authgate[hidden],.authgate [hidden]{display:none!important}
+.aw{position:relative;isolation:isolate;min-height:100%;display:flex;flex-direction:column}
+.aw[hidden]{display:none}
+.aw::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 55% at 85% -5%,var(--accent-soft),transparent 70%),
+             radial-gradient(45% 40% at 0% 100%,var(--accent-soft),transparent 70%)}
+.aw[inert]{opacity:.55;filter:blur(2px)}
+.aw-top,.aw-main{width:100%;max-width:980px;margin:0 auto;padding-left:var(--gut);padding-right:var(--gut)}
+.aw-top{display:flex;align-items:center;gap:10px;padding-top:calc(env(safe-area-inset-top) + 18px)}
+.aw-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;flex:none;
+  background:var(--accent);color:var(--accent-ink)}
+.aw-mark.sm{width:34px;height:34px;border-radius:10px}
+.aw-name{font-family:var(--display);font-weight:700;font-size:1.45rem;letter-spacing:.02em}
+.aw-main{flex:1;display:flex;flex-direction:column;justify-content:center;padding-top:32px;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+.aw-main h1{font-size:clamp(2.8rem,10vw,5rem);line-height:.98;margin:0 0 14px}
+.aw-main .aw-lead{font-size:clamp(1.05rem,3.4vw,1.3rem);color:var(--muted);max-width:32ch;line-height:1.45;margin:0}
+.aw-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.aw-actions .btn{min-width:140px}
+.aw-note{margin:18px 0 0;color:var(--dim);font-size:.86rem;max-width:44ch}
+.aw-status .aw-main h1{font-size:clamp(2rem,7vw,3.1rem);max-width:18ch}
+.aw-status .aw-main h1:focus{outline:none}
+.st-steps{list-style:none;margin:22px 0 0;padding:0;max-width:460px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--surface)}
+.st-steps li{display:flex;justify-content:space-between;gap:14px;padding:13px 16px;font-size:.92rem}
+.st-steps li+li{border-top:1px solid var(--line)}
+.st-k{color:var(--muted)}
+.st-v{font-weight:600;text-align:right;overflow-wrap:anywhere}
+.st-steps li.done .st-v{color:var(--accent)}
+.st-steps li.wait .st-v{color:var(--warn)}
+.st-msg{min-height:1.3em;margin:14px 0 0;font-size:.88rem;color:var(--muted)}
+.st-msg.bad{color:var(--alert)}
+.aw-status .aw-actions{margin-top:12px}
+
+.adlg-wrap{position:fixed;left:0;right:0;top:var(--vvt,0px);height:var(--vvh,100dvh);z-index:210;
+  display:flex;align-items:flex-end;justify-content:center}
+.adlg-wrap[hidden]{display:none}
+.adlg-scrim{position:absolute;inset:0;background:rgba(0,0,0,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.adlg{position:relative;width:100%;max-height:100%;display:flex;flex-direction:column;
+  background:var(--surface);color:var(--text);border:1px solid var(--line);border-bottom:0;
+  border-radius:var(--r-l) var(--r-l) 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.35)}
+.adlg:focus{outline:none}
+.adlg-hd{flex:none;display:flex;align-items:center;gap:12px;padding:16px var(--gut) 6px}
+.adlg-ti{flex:1;min-width:0}
+.adlg-ti h2{font-size:1.7rem;margin-top:2px}
+.adlg-ti h2:focus{outline:none}
+.adlg-x{flex:none;width:44px;height:44px;margin:-6px -8px 0 0;display:grid;place-items:center;
+  background:transparent;border:0;border-radius:50%;color:var(--muted);cursor:pointer}
+.adlg-x:hover{background:var(--surface-2);color:var(--text)}
+.adlg-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+  padding:2px var(--gut) calc(22px + env(safe-area-inset-bottom))}
+.adlg-sub{margin:0 0 14px;color:var(--muted);font-size:.94rem}
+.adlg-msg{margin:0 0 14px;font-size:.98rem;line-height:1.5}
+.adlg-note{margin:12px 0 0;color:var(--dim);font-size:.82rem;line-height:1.45}
+.adlg :focus-visible,.authgate :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (min-width:600px){
+  .adlg-wrap{align-items:center;padding:24px}
+  .adlg{width:min(440px,100%);max-height:min(100%,760px);border:1px solid var(--line);border-radius:var(--r-l);
+    box-shadow:0 24px 70px rgba(0,0,0,.45)}
+}
+@keyframes adlgUp{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes adlgPop{from{transform:scale(.97);opacity:0}to{transform:none;opacity:1}}
+@keyframes adlgFade{from{opacity:0}to{opacity:1}}
+@keyframes adlgSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:no-preference){
+  .adlg{animation:adlgUp .22s var(--ease)}
+  .adlg-scrim{animation:adlgFade .22s var(--ease)}
+  .btn.busy::after{content:"";width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:adlgSpin .7s linear infinite}
+}
+@media (prefers-reduced-motion:no-preference) and (min-width:600px){
+  .adlg{animation-name:adlgPop}
+}
+
+.atabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;margin:6px 0 18px;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:12px}
+.atabs[hidden]{display:none}
+.atabs button{min-height:44px;border:0;border-radius:9px;background:transparent;color:var(--muted);
+  font:inherit;font-weight:600;cursor:pointer}
+.atabs button[aria-selected="true"]{background:var(--bg);color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
+
+.af{margin:0 0 14px}
+.af label{display:block;margin:0 0 6px;font-size:.88rem;font-weight:600}
+.af input{display:block;width:100%;min-height:48px;padding:11px 14px;font:inherit;font-size:1rem;
+  color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-s)}
+.af input:focus{border-color:var(--accent)}
+.af input[aria-invalid="true"]{border-color:var(--alert)}
+.af-err{margin:6px 0 0;font-size:.84rem;line-height:1.35;color:var(--alert)}
+.af-err[hidden],.autherr[hidden]{display:none}
+.pwrap{position:relative}
+.pwrap input{padding-right:52px}
+.pwtoggle{position:absolute;right:2px;top:2px;width:44px;height:44px;display:grid;place-items:center;
+  border:0;border-radius:var(--r-s);background:transparent;color:var(--muted);cursor:pointer}
+.pwtoggle:hover{color:var(--text)}
+.pwtoggle[aria-pressed="true"]{color:var(--accent)}
+.pwreq{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:3px;font-size:.8rem;color:var(--muted)}
+.pwreq li{display:flex;gap:7px;align-items:baseline}
+.pwreq li::before{content:"\25CB";font-size:.75em}
+.pwreq li.met{color:var(--accent)}
+.pwreq li.met::before{content:"\2713";font-weight:700}
+.autherr{margin:0 0 12px;padding:10px 12px;border-radius:var(--r-s);font-size:.88rem;line-height:1.4;
+  color:var(--text);background:var(--alert-soft);border:1px solid var(--alert)}
+.hp{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+.alinks{margin:14px 0 0;text-align:center}
+.alink{background:none;border:0;padding:10px 8px;min-height:44px;font:inherit;font-size:.92rem;font-weight:600;
+  color:var(--accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.authfoot{margin:12px 0 0;font-size:.82rem;text-align:center}
+.authfoot:empty{display:none}
+.btn[aria-disabled="true"]{opacity:.6;cursor:progress}
 </style>
+<link rel="stylesheet" href="views.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
-<!-- ============================= auth gate ============================== -->
+<!-- ============================= auth gate ==============================
+     Public surface only. Nothing here comes from the account or the server:
+     the welcome page, the dialog and the account-status page. The app itself
+     is hidden and inert while body.locked is set. Enforcement is server-side. -->
 <div id="authGate" class="authgate" hidden>
-  <div class="authcard">
-    <div class="authbrand">
-      <span class="eyebrow">Recomp</span>
-      <h1 id="authHeading">Sign in</h1>
-      <p class="muted" id="authSub">Your training data is private to your account.</p>
+
+  <div class="aw" id="authWelcome">
+    <div class="aw-top">
+      <span class="aw-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 12h18M6 7v10M9.5 9v6M14.5 9v6M18 7v10"/></svg></span>
+      <span class="aw-name">Recomp</span>
     </div>
-
-    <form id="loginForm" autocomplete="on">
-      <div class="authfield">
-        <label for="loginEmail">Login</label>
-        <input id="loginEmail" type="text" name="username" autocomplete="username"
-               autocapitalize="none" autocorrect="off" spellcheck="false" required>
+    <div class="aw-main">
+      <h1>Recomp</h1>
+      <p class="aw-lead">Strength training that adapts to you and explains every change it makes.</p>
+      <div class="aw-actions">
+        <button class="btn primary lg" type="button" id="awLogin">Log in</button>
+        <button class="btn lg" type="button" id="awSignup">Sign up</button>
       </div>
-      <div class="authfield">
-        <label for="loginPassword">Password</label>
-        <input id="loginPassword" type="password" name="password"
-               autocomplete="current-password" required>
-      </div>
-      <p class="autherr" id="loginError" role="alert" hidden></p>
-      <button class="btn primary block lg" id="loginBtn" type="submit">Sign in</button>
-    </form>
-
-    <form id="setupForm" hidden autocomplete="on">
-      <div class="authfield">
-        <label for="setupEmail">Login</label>
-        <input id="setupEmail" type="text" name="username" autocomplete="username"
-               autocapitalize="none" autocorrect="off" spellcheck="false" required>
-      </div>
-      <div class="authfield">
-        <label for="setupPw">Choose a password</label>
-        <input id="setupPw" type="password" name="password" autocomplete="new-password" required>
-        <span class="dim" style="font-size:.78rem">At least 12 characters, with a lowercase letter, a digit and an uppercase letter or symbol.</span>
-      </div>
-      <div class="authfield">
-        <label for="setupConfirm">Repeat password</label>
-        <input id="setupConfirm" type="password" autocomplete="new-password" required>
-      </div>
-      <p class="autherr" id="setupError" role="alert" hidden></p>
-      <button class="btn primary block lg" id="setupBtn" type="submit">Create my account</button>
-    </form>
-
-    <form id="pwForm" hidden autocomplete="on">
-      <p class="banner" style="margin-bottom:12px">
-        <span>Choose a new password before you continue. The one you were given is temporary.</span></p>
-      <div class="authfield">
-        <label for="pwCurrent">Current password</label>
-        <input id="pwCurrent" type="password" autocomplete="current-password" required>
-      </div>
-      <div class="authfield">
-        <label for="pwNext">New password</label>
-        <input id="pwNext" type="password" autocomplete="new-password" required>
-        <span class="dim" style="font-size:.78rem">At least 12 characters, with a digit and an uppercase letter or symbol.</span>
-      </div>
-      <div class="authfield">
-        <label for="pwConfirm">Repeat new password</label>
-        <input id="pwConfirm" type="password" autocomplete="new-password" required>
-      </div>
-      <p class="autherr" id="pwError" role="alert" hidden></p>
-      <button class="btn primary block lg" id="pwBtn" type="submit">Set password and continue</button>
-    </form>
-
-    <div id="authBlocked" hidden>
-      <p class="banner bad" id="authBlockedMsg"></p>
-      <button class="btn ghost block" id="authBackBtn">Back to sign in</button>
+      <p class="aw-note">New accounts are checked by an administrator before they can be used.</p>
     </div>
-
-    <p class="dim authfoot" id="authFoot"></p>
   </div>
+
+  <section class="aw aw-status" id="authStatus" hidden aria-labelledby="stTitle">
+    <div class="aw-top">
+      <span class="aw-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 12h18M6 7v10M9.5 9v6M14.5 9v6M18 7v10"/></svg></span>
+      <span class="aw-name">Recomp</span>
+    </div>
+    <div class="aw-main st-card">
+      <h1 id="stTitle" tabindex="-1">Your account is awaiting approval</h1>
+      <p class="aw-lead" id="stLead"></p>
+      <ul class="st-steps" id="stSteps">
+        <li id="stEmailStep"><span class="st-k">Email address</span><span class="st-v" id="stEmailVal"></span></li>
+        <li id="stApprovalStep"><span class="st-k">Administrator approval</span><span class="st-v" id="stApprovalVal"></span></li>
+      </ul>
+      <p class="st-msg" id="stMsg" role="status" aria-live="polite"></p>
+      <div class="aw-actions">
+        <button class="btn" type="button" id="stResend" hidden>Resend email</button>
+        <button class="btn" type="button" id="stCheck">Check again</button>
+        <button class="btn ghost" type="button" id="stLogout">Log out</button>
+        <button class="btn primary" type="button" id="stBack" hidden>Back to log in</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="adlg-wrap" id="authDialogWrap" hidden>
+    <div class="adlg-scrim" id="authScrim"></div>
+    <div class="adlg" id="authDialog" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authSub" tabindex="-1">
+      <div class="adlg-hd">
+        <span class="aw-mark sm" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 12h18M6 7v10M9.5 9v6M14.5 9v6M18 7v10"/></svg></span>
+        <div class="adlg-ti">
+          <span class="eyebrow">Recomp</span>
+          <h2 id="authTitle" tabindex="-1">Log in</h2>
+        </div>
+        <button class="adlg-x" type="button" id="authClose" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="adlg-body" id="authBody">
+        <p class="adlg-sub" id="authSub"></p>
+        <div class="atabs" role="tablist" aria-label="Log in or sign up" id="authTabs">
+          <button type="button" role="tab" id="tabLogin" aria-selected="true" aria-controls="loginForm" tabindex="0">Log in</button>
+          <button type="button" role="tab" id="tabSignup" aria-selected="false" aria-controls="signupForm" tabindex="-1">Sign up</button>
+        </div>
+
+        <!-- log in -->
+        <form id="loginForm" data-view="login" role="tabpanel" aria-labelledby="tabLogin" novalidate autocomplete="on">
+          <div class="af">
+            <label for="loginEmail">Email or login</label>
+            <input id="loginEmail" name="username" type="text" autocomplete="username" inputmode="email"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="loginEmail-err">
+            <p class="af-err" id="loginEmail-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="loginPassword">Password</label>
+            <div class="pwrap">
+              <input id="loginPassword" name="password" type="password" autocomplete="current-password" aria-describedby="loginPassword-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="loginPassword"></button>
+            </div>
+            <p class="af-err" id="loginPassword-err" hidden></p>
+          </div>
+          <p class="autherr" id="loginError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="loginBtn" type="submit">Log in</button>
+          <p class="alinks"><button class="alink" type="button" id="loginForgot">Forgot password?</button></p>
+        </form>
+
+        <!-- sign up -->
+        <form id="signupForm" data-view="signup" role="tabpanel" aria-labelledby="tabSignup" hidden novalidate autocomplete="on">
+          <div class="hp" aria-hidden="true">
+            <label for="signupWebsite">Website</label>
+            <input id="signupWebsite" name="website" type="text" tabindex="-1" autocomplete="off">
+          </div>
+          <div class="af">
+            <label for="signupName">Your name</label>
+            <input id="signupName" name="name" type="text" autocomplete="name" aria-describedby="signupName-err">
+            <p class="af-err" id="signupName-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="signupEmail">Email address</label>
+            <input id="signupEmail" name="email" type="email" autocomplete="email" inputmode="email"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="signupEmail-err">
+            <p class="af-err" id="signupEmail-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="signupPw">Password</label>
+            <div class="pwrap">
+              <input id="signupPw" name="new-password" type="password" autocomplete="new-password" aria-describedby="signupPw-req signupPw-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="signupPw"></button>
+            </div>
+            <ul class="pwreq" id="signupPw-req" data-pw="signupPw" aria-label="Password rules"></ul>
+            <p class="af-err" id="signupPw-err" hidden></p>
+          </div>
+          <p class="autherr" id="signupError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="signupBtn" type="submit">Create account</button>
+          <p class="adlg-note">We email you a link to confirm your address. An administrator then reviews your request.</p>
+        </form>
+
+        <!-- forgot password -->
+        <form id="forgotForm" data-view="forgot" hidden novalidate autocomplete="on">
+          <div class="af">
+            <label for="forgotEmail">Email address</label>
+            <input id="forgotEmail" name="username" type="email" autocomplete="username" inputmode="email"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="forgotEmail-err">
+            <p class="af-err" id="forgotEmail-err" hidden></p>
+          </div>
+          <p class="autherr" id="forgotError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="forgotBtn" type="submit">Send reset link</button>
+          <p class="alinks"><button class="alink" type="button" data-goto="login">Back to log in</button></p>
+        </form>
+
+        <div data-view="forgot-sent" hidden>
+          <p class="adlg-msg" id="forgotSentMsg"></p>
+          <button class="btn block" type="button" data-goto="login">Back to log in</button>
+        </div>
+
+        <!-- reset password, reached from /?reset=TOKEN -->
+        <form id="resetForm" data-view="reset" hidden novalidate autocomplete="on">
+          <div class="af">
+            <label for="resetPw">New password</label>
+            <div class="pwrap">
+              <input id="resetPw" name="new-password" type="password" autocomplete="new-password" aria-describedby="resetPw-req resetPw-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="resetPw"></button>
+            </div>
+            <ul class="pwreq" id="resetPw-req" data-pw="resetPw" aria-label="Password rules"></ul>
+            <p class="af-err" id="resetPw-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="resetConfirm">Repeat new password</label>
+            <div class="pwrap">
+              <input id="resetConfirm" type="password" autocomplete="new-password" aria-describedby="resetConfirm-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="resetConfirm"></button>
+            </div>
+            <p class="af-err" id="resetConfirm-err" hidden></p>
+          </div>
+          <p class="autherr" id="resetError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="resetBtn" type="submit">Set new password</button>
+          <p class="alinks"><button class="alink" type="button" id="resetNewLink" data-goto="forgot" hidden>Ask for a new link</button></p>
+        </form>
+
+        <div data-view="reset-done" hidden>
+          <p class="adlg-msg">Your password has been changed. Log in with the new one.</p>
+          <button class="btn primary block lg" type="button" data-goto="login">Log in</button>
+        </div>
+
+        <!-- check your email, after sign-up -->
+        <div data-view="check-email" hidden>
+          <p class="adlg-msg" id="ceMsg"></p>
+          <p class="adlg-msg dim" id="ceNote"></p>
+          <p class="st-msg" id="ceStatus" role="status" aria-live="polite"></p>
+          <button class="btn block" type="button" id="ceResend">Resend email</button>
+          <button class="btn primary block" type="button" id="ceContinue" style="margin-top:8px">Continue to my account status</button>
+          <p class="alinks"><button class="alink" type="button" data-goto="signup">Use a different email address</button></p>
+        </div>
+
+        <!-- after /?verify=TOKEN -->
+        <div data-view="verified" hidden>
+          <p class="adlg-msg" id="verMsg"></p>
+          <button class="btn primary block lg" type="button" id="verContinue">Log in</button>
+        </div>
+
+        <!-- first-time owner set-up -->
+        <form id="setupForm" data-view="setup" hidden novalidate autocomplete="on">
+          <div class="af">
+            <label for="setupEmail">Login</label>
+            <input id="setupEmail" name="username" type="text" autocomplete="username"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="setupEmail-err">
+            <p class="af-err" id="setupEmail-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="setupPw">Choose a password</label>
+            <div class="pwrap">
+              <input id="setupPw" name="new-password" type="password" autocomplete="new-password" aria-describedby="setupPw-req setupPw-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="setupPw"></button>
+            </div>
+            <ul class="pwreq" id="setupPw-req" data-pw="setupPw" aria-label="Password rules"></ul>
+            <p class="af-err" id="setupPw-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="setupConfirm">Repeat password</label>
+            <div class="pwrap">
+              <input id="setupConfirm" type="password" autocomplete="new-password" aria-describedby="setupConfirm-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="setupConfirm"></button>
+            </div>
+            <p class="af-err" id="setupConfirm-err" hidden></p>
+          </div>
+          <p class="autherr" id="setupError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="setupBtn" type="submit">Create my account</button>
+        </form>
+
+        <!-- forced password change -->
+        <form id="pwForm" data-view="password" hidden novalidate autocomplete="on">
+          <div class="af">
+            <label for="pwCurrent">Current password</label>
+            <div class="pwrap">
+              <input id="pwCurrent" type="password" autocomplete="current-password" aria-describedby="pwCurrent-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="pwCurrent"></button>
+            </div>
+            <p class="af-err" id="pwCurrent-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="pwNext">New password</label>
+            <div class="pwrap">
+              <input id="pwNext" type="password" autocomplete="new-password" aria-describedby="pwNext-req pwNext-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="pwNext"></button>
+            </div>
+            <ul class="pwreq" id="pwNext-req" data-pw="pwNext" aria-label="Password rules"></ul>
+            <p class="af-err" id="pwNext-err" hidden></p>
+          </div>
+          <div class="af">
+            <label for="pwConfirm">Repeat new password</label>
+            <div class="pwrap">
+              <input id="pwConfirm" type="password" autocomplete="new-password" aria-describedby="pwConfirm-err">
+              <button class="pwtoggle" type="button" aria-pressed="false" aria-label="Show password" data-for="pwConfirm"></button>
+            </div>
+            <p class="af-err" id="pwConfirm-err" hidden></p>
+          </div>
+          <p class="autherr" id="pwError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="pwBtn" type="submit">Set password and continue</button>
+        </form>
+
+        <p class="dim authfoot" id="authFoot"></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sr-only" id="authLive" role="status" aria-live="polite"></div>
+  <div class="sr-only" id="authAlert" role="alert"></div>
 </div>
 
 
@@ -405,6 +727,8 @@ section[hidden]{display:none}
 
     <div id="todayNotices" class="stack" style="margin-top:12px"></div>
 
+    <div id="todayExtra" class="stack" style="margin-top:12px"></div>
+
     <h2 style="margin:20px 0 8px">This week</h2>
     <div class="card">
       <div class="schedule" id="weekStrip" aria-label="Training days this week"></div>
@@ -413,9 +737,21 @@ section[hidden]{display:none}
 
     <h2 style="margin:20px 0 8px">Insight</h2>
     <div class="card"><div class="insight" id="insight"></div></div>
+  </section>
 
-    <h2 style="margin:20px 0 8px">Fuel</h2>
+  <section id="p-plan" role="tabpanel" aria-labelledby="t-plan" hidden></section>
+
+  <section id="p-workouts" role="tabpanel" aria-labelledby="t-workouts" hidden></section>
+
+  <section id="p-stretch" role="tabpanel" aria-labelledby="t-stretch" hidden></section>
+
+  <section id="p-recovery" role="tabpanel" aria-labelledby="t-recovery" hidden></section>
+
+  <section id="p-more" role="tabpanel" aria-labelledby="t-more" hidden></section>
+
+  <section id="p-nutrition" role="tabpanel" aria-labelledby="t-nutrition" hidden>
     <div class="card" id="fuelCard"></div>
+    <div id="intakeBox" style="margin-top:14px"></div>
   </section>
 
   <!-- ============================== TRAIN ============================== -->
@@ -547,6 +883,36 @@ section[hidden]{display:none}
   </div>
 </div>
 
+
+<!-- ======================== adjust today's prescription ================== -->
+<div class="sheet" id="pgSheet" role="dialog" aria-modal="true" aria-labelledby="pgTitle">
+  <div class="scrim" data-close></div>
+  <div class="panel">
+    <div class="grab"></div>
+    <div class="spread"><h2 id="pgTitle">Edit today's prescription</h2>
+      <button class="btn sm ghost" data-close>Cancel</button></div>
+    <p class="dim" style="font-size:.82rem;margin:6px 0 0">Your change is saved as yours, next to what the app recommended. The recommendation is not overwritten, and sets you have already logged are not touched.</p>
+    <div class="ps-grid" id="pgBody"></div>
+    <div id="pgErr"></div>
+    <button class="btn primary block" id="pgSave" style="margin-top:14px">Use these numbers</button>
+  </div>
+</div>
+
+<!-- ======================== exercise progression settings ================ -->
+<div class="sheet" id="psSheet" role="dialog" aria-modal="true" aria-labelledby="psTitle">
+  <div class="scrim" data-close></div>
+  <div class="panel">
+    <div class="grab"></div>
+    <div class="spread"><h2 id="psTitle">Progression settings</h2>
+      <button class="btn sm ghost" data-close>Cancel</button></div>
+    <p class="dim" style="font-size:.82rem;margin:6px 0 0">Stored for this exact variant only. Changing them never alters sessions you have already logged.</p>
+    <div class="ps-grid" id="psBody"></div>
+    <div id="psErr"></div>
+    <button class="btn primary block" id="psSave" style="margin-top:14px">Save settings</button>
+    <button class="btn ghost block" id="psReset" style="margin-top:8px">Reset to defaults</button>
+  </div>
+</div>
+
 <!-- ================================ timer ================================ -->
 <div id="timer" role="dialog" aria-label="Rest timer">
   <div class="eyebrow" id="tmLabel">Rest</div>
@@ -571,10 +937,15 @@ section[hidden]{display:none}
 <nav class="tabs" role="tablist" aria-label="Main">
   <div class="tabs-in">
     <button role="tab" id="t-today" aria-controls="p-today" aria-selected="true" data-tab="today"><span class="ic" aria-hidden="true">◉</span>Today</button>
-    <button role="tab" id="t-train" aria-controls="p-train" aria-selected="false" data-tab="train"><span class="ic" aria-hidden="true">▦</span>Train</button>
-    <button role="tab" id="t-progress" aria-controls="p-progress" aria-selected="false" data-tab="progress"><span class="ic" aria-hidden="true">◪</span>Progress</button>
-    <button role="tab" id="t-library" aria-controls="p-library" aria-selected="false" data-tab="library"><span class="ic" aria-hidden="true">☰</span>Library</button>
-    <button role="tab" id="t-profile" aria-controls="p-profile" aria-selected="false" data-tab="profile"><span class="ic" aria-hidden="true">◍</span>Profile</button>
+    <button role="tab" id="t-plan" aria-controls="p-plan" aria-selected="false" data-tab="plan"><span class="ic" aria-hidden="true">▤</span>My plan</button>
+    <button role="tab" id="t-workouts" aria-controls="p-workouts" aria-selected="false" data-tab="workouts"><span class="ic" aria-hidden="true">▦</span>Workouts</button>
+    <button role="tab" id="t-stretch" aria-controls="p-stretch" aria-selected="false" data-tab="stretch"><span class="ic" aria-hidden="true">≋</span>Stretch</button>
+    <button role="tab" id="t-recovery" class="sec" aria-controls="p-recovery" aria-selected="false" data-tab="recovery"><span class="ic" aria-hidden="true">☾</span>Recovery</button>
+    <button role="tab" id="t-nutrition" class="sec" aria-controls="p-nutrition" aria-selected="false" data-tab="nutrition"><span class="ic" aria-hidden="true">◐</span>Nutrition</button>
+    <button role="tab" id="t-progress" class="sec" aria-controls="p-progress" aria-selected="false" data-tab="progress"><span class="ic" aria-hidden="true">◪</span>Progress</button>
+    <button role="tab" id="t-library" class="sec" aria-controls="p-library" aria-selected="false" data-tab="library"><span class="ic" aria-hidden="true">☰</span>Exercises</button>
+    <button role="tab" id="t-profile" class="sec" aria-controls="p-profile" aria-selected="false" data-tab="profile"><span class="ic" aria-hidden="true">◍</span>Profile</button>
+    <button role="tab" id="t-more" class="more" aria-controls="p-more" aria-selected="false" data-tab="more"><span class="ic" aria-hidden="true">⋯</span>More</button>
   </div>
 </nav>
 
@@ -584,7 +955,18 @@ section[hidden]{display:none}
 <script src="core.js"></script>
 <script src="engine.js"></script>
 <script src="exercises.js"></script>
+<script src="plan.js"></script>
+<script src="review.js"></script>
+<script src="garmin.js"></script>
+<script src="library.js"></script>
 <script src="authclient.js"></script>
+<script src="authui.js"></script>
+<script src="admin.js"></script>
 <script src="app.js"></script>
+<script src="views-core.js"></script>
+<script src="views-today.js"></script>
+<script src="views-plan.js"></script>
+<script src="views-review.js"></script>
+<script src="views-move.js"></script>
 </body>
 </html>
