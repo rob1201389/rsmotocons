@@ -72,3 +72,6 @@ body.doc-open{overflow:hidden}
 :root[data-text="large"]{font-size:112.5%}
 :root[data-text="larger"]{font-size:125%}
 body.adm-reauth #vSheet{z-index:1000}
+.set-more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.set-more>summary{cursor:pointer;color:var(--muted, inherit);font-size:.9rem;padding:6px 0;min-height:44px;display:flex;align-items:center}
+.set-more[open]>summary{margin-bottom:6px}

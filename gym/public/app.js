@@ -1569,19 +1569,26 @@ function openStretch(s) {
 function renderProfile() {
   const P = S.profile;
   const g = $('#profGoals'); g.innerHTML = '';
-  g.appendChild(selectField('Goal','goal',P.goal,[['recomp','Recomposition'],['strength','Strength'],['hypertrophy','Hypertrophy'],['fatloss','Fat loss']],v=>{P.goal=v;}));
-  g.appendChild(selectField('Experience','experience',P.experience,[['novice','Novice'],['intermediate','Intermediate'],['advanced','Advanced']],v=>{P.experience=v;}));
-  g.appendChild(numField('Training days per week', P.trainingDaysPerWeek, 1, v => P.trainingDaysPerWeek = v));
-  g.appendChild(numField('Session length (min)', P.sessionMinutes, 5, v => P.sessionMinutes = v));
+  /* Once a plan exists its goals are set in the plan setup, so only the fields the
+     setup does not ask for stay here (Settings shows them collapsed). */
+  const planned = !!(window.Plan && Plan.hasPlan && Plan.hasPlan(S));
+  if (!planned) {
+    g.appendChild(selectField('Goal','goal',P.goal,[['recomp','Recomposition'],['strength','Strength'],['hypertrophy','Hypertrophy'],['fatloss','Fat loss']],v=>{P.goal=v;}));
+    g.appendChild(selectField('Experience','experience',P.experience,[['novice','Novice'],['intermediate','Intermediate'],['advanced','Advanced']],v=>{P.experience=v;}));
+    g.appendChild(numField('Training days per week', P.trainingDaysPerWeek, 1, v => P.trainingDaysPerWeek = v));
+    g.appendChild(numField('Session length (min)', P.sessionMinutes, 5, v => P.sessionMinutes = v));
+  }
   g.appendChild(numField('Bodyweight (kg)', P.bodyweightKg, 0.5, v => P.bodyweightKg = v));
   g.appendChild(numField('Max load jump (%)', P.maxLoadJumpPct, 1, v => P.maxLoadJumpPct = v));
   g.appendChild(numField('Treat as a break after (days)', P.returnBreakDays, 1, v => P.returnBreakDays = v));
 
-  const prog = currentProgram();
-  g.appendChild(el('p','dim',
-    `<b style="color:var(--text)">Your programme:</b> ${esc(prog.explain)}` +
-    (prog.notes && prog.notes.length ? '<br>' + prog.notes.map(esc).join('<br>') : '')));
-  g.lastChild.style.cssText = 'font-size:.82rem;margin:12px 0 0;line-height:1.5';
+  if (!planned) {
+    const prog = currentProgram();
+    g.appendChild(el('p','dim',
+      `<b style="color:var(--text)">Your programme:</b> ${esc(prog.explain)}` +
+      (prog.notes && prog.notes.length ? '<br>' + prog.notes.map(esc).join('<br>') : '')));
+    g.lastChild.style.cssText = 'font-size:.82rem;margin:12px 0 0;line-height:1.5';
+  }
 
   const eq = $('#profEquip'); eq.innerHTML = '';
   Object.keys(P.equipment).forEach(k => {

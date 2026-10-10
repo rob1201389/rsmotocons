@@ -219,9 +219,17 @@ const Settings = (function () {
       c.appendChild(el('dl', 'kv', `<dt>Goal</dt><dd>${esc(Plan.GOALS[g.primary].label)}</dd><dt>Days</dt><dd>${g.daysPerWeek} a week${g.preferredDays && g.preferredDays.length ? ' (' + g.preferredDays.map(d => Plan.DOW_NAMES[d].slice(0, 3)).join(', ') + ')' : ''}</dd><dt>Session length</dt><dd>${g.sessionMinutes} minutes</dd><dt>Equipment</dt><dd>${esc(Object.keys(g.equipment).filter(k => g.equipment[k]).join(', '))}</dd>`));
       const b = el('button', 'btn', 'Change goals, equipment and availability'); b.onclick = () => PlanUI.openGoals(false); c.appendChild(b);
       note(c, 'Changes create a new plan version from next week. Your history stays exactly as it is.');
-      ['#profGoals'].forEach(sel => { const n = document.querySelector('#p-profile ' + sel); if (n) { n.hidden = true; if (n.previousElementSibling && n.previousElementSibling.tagName === 'H2') n.previousElementSibling.hidden = true; } });
+      /* bodyweight and progression limits: kept, but out of the way */
+      const more = el('details', 'set-more'); more.id = 'setTrainingMore';
+      more.appendChild(el('summary', null, 'Bodyweight and progression limits'));
+      c.appendChild(more); moveInto(more, '#profGoals', null);
+      const pg = document.getElementById('profGoals'); if (pg) pg.hidden = false;
     } else {
+      /* first time: the plan setup asks for goals; the old card stays collapsed */
       const b = el('button', 'btn primary', 'Set up my plan'); b.onclick = () => PlanUI.openGoals(true); c.appendChild(b);
+      const more = el('details', 'set-more'); more.id = 'setTrainingMore';
+      more.appendChild(el('summary', null, 'Bodyweight and progression limits'));
+      c.appendChild(more); moveInto(more, '#profGoals', null);
     }
     c.appendChild(el('span', 'eyebrow', 'Units'));
     c.appendChild(el('p', 'muted', 'Recomp uses metric units: kilograms and centimetres, with food energy in kilocalories (kcal). Other units are not available yet.'));

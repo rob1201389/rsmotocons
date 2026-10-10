@@ -25,10 +25,10 @@ an in-memory database; no real data is involved. Result on 2026-10-10, branch
 | backend signup | 42 | pass |
 | backend ai | 25 | pass |
 | backend weekly | 18 | pass |
-| app settings and public pages (`test/settings.ui.test.js`, runs the real backend) | 42 | pass |
+| app settings and public pages (`test/settings.ui.test.js`, runs the real backend) | 43 | pass |
 | app sign-in and MFA (`test/auth.ui.test.js`) | 90 | pass |
 | other app suites (training, plan, review, Garmin, coaching, library, regression) | 498 | pass |
-| **Total** | **822** | **all pass** |
+| **Total** | **823** | **all pass** |
 
 Checked by hand in Chromium on 2026-10-10 (screenshots in `gym/docs/screens/security/`):
 public pages open from a direct link before sign-in; sign-out removes the IndexedDB copy;

@@ -121,6 +121,19 @@ const BACKEND = fs.existsSync(path.join(GYM, 'backend/src/api.js')) ? path.join(
     const x = text(c.d.querySelector('#p-profile'));
     ['Account and security', 'Goals, equipment and availability', 'Time zone, week and review day', 'Nutrition preferences', 'Theme, accessibility and motion', 'Reminders and notifications', 'Imported Garmin data', 'AI-assisted weekly reviews', 'Reviewer access and sharing', 'Your consent', 'Your data', 'About, why Recomp and privacy'].forEach(s => ok(x.includes(s), s));
   });
+  t('goals are set in the plan setup, not in a prominent card at the top of Settings', () => {
+    const pg = c.d.getElementById('profGoals'), planned = c.w.Plan.hasPlan(c.A.S);
+    if (planned) {
+      const det = pg.closest('details'); ok(det && det.id === 'setTrainingMore', 'inside the collapsed section'); ok(!det.open, 'collapsed by default');
+      ok(/Bodyweight \(kg\)/.test(text(pg)) && /Max load jump/.test(text(pg)), 'bodyweight and limits still reachable');
+      ok(!/Training days per week|Session length/.test(text(pg)), 'no duplicate goal fields');
+      ok(/Change goals, equipment and availability/.test(text(c.d.querySelector('#p-profile'))));
+    } else {
+      ok(pg.closest('details') && !pg.closest('details').open, 'old goals card collapsed before the plan exists');
+      ok(/Set up my plan/.test(text(c.d.querySelector('#p-profile'))));
+    }
+    const first = c.d.querySelector('#p-profile h2:not([hidden])'); ok(!first || !/Goals and training/.test(first.textContent), 'no Goals and training heading');
+  });
   t('sessions are listed with this device marked', () => ok(/this device/.test(text(c.d.querySelector('#setSessions')))));
   t('AI reviews are off by default, with what happens to past reports explained', () => {
     eq(c.d.getElementById('setAiToggle').checked, false); ok(/Feedback already written stays in your past reports/.test(text(c.d.querySelector('#set-ai'))));
