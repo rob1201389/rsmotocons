@@ -16,7 +16,8 @@
 
 const EXERCISES = [
 /* ------------------------------------------------------------- DAY 1: UPPER A */
-{ id:'bench-barbell', name:'Barbell bench press', short:'Bench press', day:1, order:1,
+{ id:'bench-barbell', name:'Barbell bench press',
+  viewAngle:'side', short:'Bench press', day:1, order:1,
   modality:'load_reps', equipment:'barbell', pattern:'horizontal push',
   primary:'chest', secondary:['front delt','triceps'], direction:'Bar travels down to the lower chest and back up over the shoulders.',
   sets:4, lo:5, hi:8, restSec:180, anim:'bench',
@@ -26,7 +27,8 @@ const EXERCISES = [
   mistakes:['Elbows flared straight out — hard on the shoulder and weaker.','Bouncing the bar off the chest.','Heels lifting or hips coming off the bench.'],
   alternatives:['db-bench','incline-barbell-press','machine-chest-press'] },
 
-{ id:'row-barbell', name:'Barbell bent-over row', short:'Barbell row', day:1, order:2,
+{ id:'row-barbell', name:'Barbell bent-over row',
+  viewAngle:'side', short:'Barbell row', day:1, order:2,
   modality:'load_reps', equipment:'barbell', pattern:'horizontal pull',
   primary:'back', secondary:['rear delt','biceps'], direction:'Bar pulled from arms-extended up to the lower ribs.',
   sets:4, lo:6, hi:10, restSec:150, anim:'row',
@@ -36,7 +38,8 @@ const EXERCISES = [
   mistakes:['Torso rising with each rep until it becomes a shrug.','Jerking the weight with the lower back.','Pulling to the collarbone instead of the ribs.'],
   alternatives:['chest-supported-row','seated-cable-row','db-row'] },
 
-{ id:'ohp-barbell', name:'Barbell overhead press', short:'Overhead press', day:1, order:3,
+{ id:'ohp-barbell', name:'Barbell overhead press',
+  viewAngle:'side', short:'Overhead press', day:1, order:3,
   modality:'load_reps', equipment:'barbell', pattern:'vertical push',
   primary:'shoulders', secondary:['triceps','upper chest'], direction:'Bar from the front rack straight overhead to lockout.',
   sets:3, lo:8, hi:10, restSec:150, anim:'ohp',
@@ -46,7 +49,8 @@ const EXERCISES = [
   mistakes:['Leaning back to turn it into a standing incline press.','Pressing around the face instead of moving the head.','Losing the brace so the lower back takes the load.'],
   alternatives:['db-shoulder-press','machine-shoulder-press'] },
 
-{ id:'lat-pulldown', name:'Lat pulldown', short:'Pulldown', day:1, order:4,
+{ id:'lat-pulldown', name:'Lat pulldown',
+  viewAngle:'side', short:'Pulldown', day:1, order:4,
   modality:'load_reps', equipment:'cable', pattern:'vertical pull',
   primary:'back', secondary:['biceps'], direction:'Bar pulled from overhead down to the upper chest.',
   sets:3, lo:8, hi:12, restSec:120, anim:'pulldown',
@@ -57,7 +61,8 @@ const EXERCISES = [
   alternatives:['pull-up','assisted-pull-up'],
   note:'Split from the pull-up: different loading, different history.' },
 
-{ id:'incline-db-press', name:'Incline dumbbell press', short:'Incline DB press', day:1, order:5,
+{ id:'incline-db-press', name:'Incline dumbbell press',
+  viewAngle:'side', short:'Incline DB press', day:1, order:5,
   modality:'load_reps', equipment:'dumbbell', pattern:'incline push',
   primary:'upper chest', secondary:['front delt','triceps'], direction:'Dumbbells from a stretch at the chest pressed up and slightly together.',
   sets:3, lo:10, hi:12, restSec:120, anim:'incdb',
@@ -67,17 +72,19 @@ const EXERCISES = [
   mistakes:['Bench too steep.','Bouncing out of the bottom.','Letting the elbows flare to 90°.'],
   alternatives:['incline-barbell-press','machine-chest-press'] },
 
-{ id:'face-pull', name:'Face pull', short:'Face pull', day:1, order:6,
+{ id:'face-pull', name:'Face pull',
+  viewAngle:'front', short:'Face pull', day:1, order:6,
   modality:'load_reps', equipment:'cable', pattern:'horizontal pull',
   primary:'rear delt', secondary:['upper back'], direction:'Rope pulled to the forehead with the hands splitting apart.',
-  sets:3, lo:15, hi:20, restSec:60, anim:'facepull',
+  sets:3, lo:15, hi:20, restSec:60, anim:'facepull_front',
   setup:['Rope at roughly eye height.','Overhand grip, thumbs pointing back.','Step back so there is tension at the start.'],
   execution:['Pull the rope to the forehead, hands separating.','Finish with the elbows high and wide.','Return under control.'],
   breathing:'Out as you pull.',
   mistakes:['Going too heavy and turning it into a high row.','Elbows dropping below the shoulders.','No pause at the back.'],
   alternatives:['band-pull-apart','reverse-fly'] },
 
-{ id:'triceps-pushdown', name:'Triceps pushdown', short:'Pushdown', day:1, order:7,
+{ id:'triceps-pushdown', name:'Triceps pushdown',
+  viewAngle:'side', short:'Pushdown', day:1, order:7,
   modality:'load_reps', equipment:'cable', pattern:'elbow extension',
   primary:'triceps', secondary:[], direction:'Forearms travel from bent to locked out at the hips.',
   sets:3, lo:12, hi:15, restSec:60, anim:'push',
@@ -87,7 +94,8 @@ const EXERCISES = [
   mistakes:['Elbows drifting forward so the shoulders take over.','Leaning in to use bodyweight.','Short, partial reps.'],
   alternatives:['overhead-triceps-ext','close-grip-bench'] },
 
-{ id:'barbell-curl', name:'Barbell curl', short:'Barbell curl', day:1, order:8,
+{ id:'barbell-curl', name:'Barbell curl',
+  viewAngle:'side', short:'Barbell curl', day:1, order:8,
   modality:'load_reps', equipment:'barbell', pattern:'elbow flexion',
   primary:'biceps', secondary:['forearm'], direction:'Bar curled from the thighs to the shoulders.',
   sets:3, lo:12, hi:15, restSec:60, anim:'curl1',
@@ -97,7 +105,8 @@ const EXERCISES = [
   mistakes:['Swinging the hips to start the rep.','Cutting the bottom of the range.','Elbows drifting up into a front raise.'],
   alternatives:['incline-db-curl','cable-curl'] },
 
-{ id:'cable-crunch', name:'Kneeling cable crunch', short:'Cable crunch', day:1, order:9, block:'core',
+{ id:'cable-crunch', name:'Kneeling cable crunch',
+  viewAngle:'side', short:'Cable crunch', day:1, order:9, block:'core',
   modality:'load_reps', equipment:'cable', pattern:'spinal flexion',
   primary:'abs', secondary:[], direction:'Spine rounds down toward the knees against the cable.',
   sets:4, lo:6, hi:10, restSec:75, anim:'cablecrunch',
@@ -107,7 +116,8 @@ const EXERCISES = [
   mistakes:['Hinging at the hips, which makes it a hip-flexor exercise.','Pulling with the arms.','Going so heavy the range disappears.'],
   alternatives:['weighted-hanging-leg-raise','ab-wheel-kneeling'] },
 
-{ id:'pallof-press', name:'Half-kneeling Pallof press', short:'Pallof press', day:1, order:10, block:'core',
+{ id:'pallof-press', name:'Half-kneeling Pallof press',
+  viewAngle:'side-limited', short:'Pallof press', day:1, order:10, block:'core',
   modality:'load_reps', equipment:'cable', pattern:'anti-rotation', perSide:true,
   primary:'obliques', secondary:['abs'], direction:'Hands press straight out while the cable tries to rotate you.',
   sets:3, lo:8, hi:10, restSec:60, anim:'pallof', holdSec:3,
@@ -118,7 +128,8 @@ const EXERCISES = [
   alternatives:['suitcase-carry','side-plank-weighted'] },
 
 /* ------------------------------------------------------------- DAY 2: LOWER A */
-{ id:'squat-barbell', name:'Barbell back squat', short:'Back squat', day:2, order:1,
+{ id:'squat-barbell', name:'Barbell back squat',
+  viewAngle:'side', short:'Back squat', day:2, order:1,
   modality:'load_reps', equipment:'barbell', pattern:'squat',
   primary:'quads', secondary:['glutes','adductors','spinal erectors'], direction:'Hips and knees bend to at least parallel, then drive back up.',
   sets:4, lo:5, hi:8, restSec:180, anim:'squat',
@@ -128,7 +139,8 @@ const EXERCISES = [
   mistakes:['Knees caving in on the way up.','Heels lifting — usually ankle range, see the calf-and-ankle mobility work.','Hips shooting up first so it becomes a good morning.'],
   alternatives:['front-squat','leg-press','goblet-squat'] },
 
-{ id:'rdl-barbell', name:'Romanian deadlift', short:'RDL', day:2, order:2,
+{ id:'rdl-barbell', name:'Romanian deadlift',
+  viewAngle:'side', short:'RDL', day:2, order:2,
   modality:'load_reps', equipment:'barbell', pattern:'hinge',
   primary:'hamstrings', secondary:['glutes','spinal erectors'], direction:'Hips travel back, bar slides down the thighs, then hips drive forward.',
   sets:3, lo:8, hi:10, restSec:150, anim:'rdl',
@@ -138,7 +150,8 @@ const EXERCISES = [
   mistakes:['Turning it into a squat by bending the knees.','Letting the bar drift away from the legs.','Rounding the lower back to chase depth.'],
   alternatives:['db-rdl','good-morning','seated-leg-curl'] },
 
-{ id:'leg-press', name:'Leg press', short:'Leg press', day:2, order:3,
+{ id:'leg-press', name:'Leg press',
+  viewAngle:'side', short:'Leg press', day:2, order:3,
   modality:'load_reps', equipment:'machine', pattern:'squat',
   primary:'quads', secondary:['glutes'], direction:'Platform pushed away until the knees are almost straight.',
   sets:3, lo:10, hi:12, restSec:120, anim:'legpress',
@@ -148,7 +161,8 @@ const EXERCISES = [
   mistakes:['Going so deep the pelvis tucks off the pad.','Locking the knees hard at the top.','Hands on the knees.'],
   alternatives:['squat-barbell','hack-squat','goblet-squat'] },
 
-{ id:'seated-leg-curl', name:'Seated leg curl', short:'Seated leg curl', day:2, order:4,
+{ id:'seated-leg-curl', name:'Seated leg curl',
+  viewAngle:'side', short:'Seated leg curl', day:2, order:4,
   modality:'load_reps', equipment:'machine', pattern:'knee flexion',
   primary:'hamstrings', secondary:[], direction:'Heels pulled down and back under the seat.',
   sets:3, lo:10, hi:12, restSec:90, anim:'legcurl1',
@@ -158,7 +172,8 @@ const EXERCISES = [
   mistakes:['Hips lifting off the seat.','Letting the weight slam back.','Half reps at the top.'],
   alternatives:['lying-leg-curl','rdl-barbell'] },
 
-{ id:'standing-calf-raise', name:'Standing calf raise', short:'Standing calf', day:2, order:5,
+{ id:'standing-calf-raise', name:'Standing calf raise',
+  viewAngle:'side', short:'Standing calf', day:2, order:5,
   modality:'load_reps', equipment:'machine', pattern:'ankle extension',
   primary:'calves', secondary:[], direction:'Heels drop below the step, then press up onto the toes.',
   sets:4, lo:12, hi:15, restSec:60, anim:'calf1',
@@ -168,7 +183,8 @@ const EXERCISES = [
   mistakes:['Bouncing the stretch.','Tiny range at the top.','Bending the knees, which shifts it to the soleus.'],
   alternatives:['seated-calf-raise','smith-calf-raise'] },
 
-{ id:'hanging-leg-raise', name:'Hanging leg raise', short:'Leg raise', day:2, order:6, block:'core',
+{ id:'hanging-leg-raise', name:'Hanging leg raise',
+  viewAngle:'side', short:'Leg raise', day:2, order:6, block:'core',
   modality:'bodyweight_reps', equipment:'bodyweight', pattern:'spinal flexion',
   primary:'abs', secondary:['hip flexors'], direction:'Legs and pelvis curl up toward the ribs from a dead hang.',
   sets:4, lo:6, hi:12, restSec:75, anim:'legraise_bw',
@@ -179,7 +195,8 @@ const EXERCISES = [
   alternatives:['weighted-hanging-leg-raise','hanging-knee-raise','cable-crunch'],
   note:'Split from the weighted version: progresses by reps, not load.' },
 
-{ id:'weighted-hanging-leg-raise', name:'Weighted hanging leg raise', short:'Weighted leg raise', day:2, order:6, block:'core',
+{ id:'weighted-hanging-leg-raise', name:'Weighted hanging leg raise',
+  viewAngle:'side', short:'Weighted leg raise', day:2, order:6, block:'core',
   modality:'weighted_bodyweight', equipment:'bodyweight', pattern:'spinal flexion',
   primary:'abs', secondary:['hip flexors'], direction:'As the bodyweight version, with a dumbbell held between the feet.',
   sets:4, lo:6, hi:10, restSec:75, anim:'legraise',
@@ -190,7 +207,8 @@ const EXERCISES = [
   alternatives:['hanging-leg-raise','cable-crunch'],
   prerequisite:'hanging-leg-raise' },
 
-{ id:'suitcase-carry', name:'Suitcase carry', short:'Suitcase carry', day:2, order:7, block:'core',
+{ id:'suitcase-carry', name:'Suitcase carry',
+  viewAngle:'side', short:'Suitcase carry', day:2, order:7, block:'core',
   modality:'carry', equipment:'dumbbell', pattern:'anti-lateral flexion', perSide:true,
   primary:'obliques', secondary:['traps','grip','quadratus lumborum'], direction:'Walk a set distance with load in one hand only.',
   sets:3, lo:40, hi:40, restSec:120, anim:'suitcase', unit:'m',
@@ -201,7 +219,8 @@ const EXERCISES = [
   alternatives:['farmers-walk','side-plank-weighted'],
   progressionNote:'Distance is fixed at 40 m. Load is the only thing that moves — past about 45 seconds a carry trains conditioning instead of strength.' },
 
-{ id:'side-plank-weighted', name:'Weighted side plank', short:'Side plank', day:2, order:8, block:'core',
+{ id:'side-plank-weighted', name:'Weighted side plank',
+  viewAngle:'side', short:'Side plank', day:2, order:8, block:'core',
   modality:'timed_hold', equipment:'bodyweight', pattern:'anti-lateral flexion', perSide:true,
   primary:'obliques', secondary:['glute medius'], direction:'Hold a straight line on one elbow against gravity.',
   sets:3, lo:20, hi:30, restSec:60, anim:'sideplank', unit:'s',
@@ -213,7 +232,8 @@ const EXERCISES = [
   progressionNote:'Seconds climb to 30, then load is added and the time resets to 20.' },
 
 /* ------------------------------------------------------------- DAY 3: UPPER B */
-{ id:'incline-barbell-press', name:'Incline barbell press', short:'Incline press', day:3, order:1,
+{ id:'incline-barbell-press', name:'Incline barbell press',
+  viewAngle:'side', short:'Incline press', day:3, order:1,
   modality:'load_reps', equipment:'barbell', pattern:'incline push',
   primary:'upper chest', secondary:['front delt','triceps'], direction:'Bar lowered to the upper chest on an inclined bench and pressed back up.',
   sets:4, lo:8, hi:12, restSec:150, anim:'incbar',
@@ -223,7 +243,8 @@ const EXERCISES = [
   mistakes:['Bench too steep so the shoulders take over.','Bar drifting toward the throat.','Bouncing off the chest.'],
   alternatives:['incline-db-press','bench-barbell'] },
 
-{ id:'pull-up', name:'Pull-up', short:'Pull-up', day:3, order:2,
+{ id:'pull-up', name:'Pull-up',
+  viewAngle:'side', short:'Pull-up', day:3, order:2,
   modality:'bodyweight_reps', equipment:'bodyweight', pattern:'vertical pull',
   primary:'back', secondary:['biceps','rear delt'], direction:'Body pulled from a dead hang until the chin clears the bar.',
   sets:4, lo:5, hi:12, restSec:150, anim:'pullup_bw',
@@ -234,7 +255,8 @@ const EXERCISES = [
   alternatives:['assisted-pull-up','lat-pulldown','weighted-pull-up'],
   note:'Split from the pulldown and from the weighted version — three separate histories.' },
 
-{ id:'assisted-pull-up', name:'Assisted pull-up', short:'Assisted pull-up', day:3, order:2,
+{ id:'assisted-pull-up', name:'Assisted pull-up',
+  viewAngle:'side', short:'Assisted pull-up', day:3, order:2,
   modality:'assisted', equipment:'assisted', pattern:'vertical pull',
   primary:'back', secondary:['biceps'], direction:'As the pull-up, with a machine or band carrying part of your bodyweight.',
   sets:4, lo:8, hi:12, restSec:150, anim:'pullup_assisted',
@@ -245,7 +267,8 @@ const EXERCISES = [
   alternatives:['pull-up','lat-pulldown'],
   progressionNote:'Less assistance is progress. The engine reduces the assistance stack, it does not add to it.' },
 
-{ id:'weighted-pull-up', name:'Weighted pull-up', short:'Weighted pull-up', day:3, order:2,
+{ id:'weighted-pull-up', name:'Weighted pull-up',
+  viewAngle:'side', short:'Weighted pull-up', day:3, order:2,
   modality:'weighted_bodyweight', equipment:'bodyweight', pattern:'vertical pull',
   primary:'back', secondary:['biceps'], direction:'Pull-up with load hung from a belt or held between the feet.',
   sets:4, lo:5, hi:8, restSec:180, anim:'pullup_weighted',
@@ -256,7 +279,8 @@ const EXERCISES = [
   alternatives:['pull-up','lat-pulldown'],
   prerequisite:'pull-up' },
 
-{ id:'db-shoulder-press', name:'Seated dumbbell shoulder press', short:'DB shoulder press', day:3, order:3,
+{ id:'db-shoulder-press', name:'Seated dumbbell shoulder press',
+  viewAngle:'side', short:'DB shoulder press', day:3, order:3,
   modality:'load_reps', equipment:'dumbbell', pattern:'vertical push',
   primary:'shoulders', secondary:['triceps'], direction:'Dumbbells pressed from shoulder height to overhead.',
   sets:3, lo:10, hi:12, restSec:120, anim:'dbohp',
@@ -266,7 +290,8 @@ const EXERCISES = [
   mistakes:['Shrugging at the top.','Flaring the elbows straight out.','Arching the lower back off the bench.'],
   alternatives:['ohp-barbell','machine-shoulder-press'] },
 
-{ id:'chest-supported-row', name:'Chest-supported row', short:'CS row', day:3, order:4,
+{ id:'chest-supported-row', name:'Chest-supported row',
+  viewAngle:'side', short:'CS row', day:3, order:4,
   modality:'load_reps', equipment:'dumbbell', pattern:'horizontal pull',
   primary:'back', secondary:['rear delt','biceps'], direction:'Dumbbells pulled to the ribs with the chest braced on a bench.',
   sets:3, lo:10, hi:12, restSec:120, anim:'csrow',
@@ -276,27 +301,30 @@ const EXERCISES = [
   mistakes:['Chest coming off the pad to cheat the weight.','Shrugging instead of rowing.','Cutting the stretch.'],
   alternatives:['row-barbell','seated-cable-row'] },
 
-{ id:'cable-fly', name:'Cable fly', short:'Cable fly', day:3, order:5,
+{ id:'cable-fly', name:'Cable fly',
+  viewAngle:'front', short:'Cable fly', day:3, order:5,
   modality:'load_reps', equipment:'cable', pattern:'horizontal adduction',
   primary:'chest', secondary:['front delt'], direction:'Arms sweep from wide to together in front of the chest.',
-  sets:3, lo:12, hi:15, restSec:60, anim:'fly',
+  sets:3, lo:12, hi:15, restSec:60, anim:'fly_front',
   setup:['Cables at about chest height.','Slight fixed bend in the elbows.'],
   execution:['Sweep the hands together in front of the chest.','Return to a controlled stretch.'],
   breathing:'Out as you bring the hands together.',
   mistakes:['Bending and straightening the elbows, making it a press.','Letting the shoulders roll forward in the stretch.','Going too heavy to control the back half.'],
   alternatives:['pec-deck','incline-db-press'] },
 
-{ id:'lateral-raise', name:'Lateral raise', short:'Lateral raise', day:3, order:6,
+{ id:'lateral-raise', name:'Lateral raise',
+  viewAngle:'front', short:'Lateral raise', day:3, order:6,
   modality:'load_reps', equipment:'dumbbell', pattern:'shoulder abduction',
   primary:'side delt', secondary:[], direction:'Arms raised out to the sides to shoulder height.',
-  sets:3, lo:15, hi:20, restSec:45, anim:'lat',
+  sets:3, lo:15, hi:20, restSec:45, anim:'lat_front',
   setup:['Dumbbells at the sides, slight forward lean.','Small fixed bend in the elbows.'],
   execution:['Lead with the elbows out to shoulder height.','Lower slowly.'],
   breathing:'Out on the way up.',
   mistakes:['Swinging with the hips.','Going above shoulder height so the traps take over.','Too heavy to control the lowering.'],
   alternatives:['cable-lateral-raise','machine-lateral-raise'] },
 
-{ id:'incline-db-curl', name:'Incline dumbbell curl', short:'Incline curl', day:3, order:7,
+{ id:'incline-db-curl', name:'Incline dumbbell curl',
+  viewAngle:'side', short:'Incline curl', day:3, order:7,
   modality:'load_reps', equipment:'dumbbell', pattern:'elbow flexion',
   primary:'biceps', secondary:[], direction:'Dumbbells curled from a stretched position behind the torso.',
   sets:3, lo:12, hi:15, restSec:60, anim:'curl2',
@@ -306,7 +334,8 @@ const EXERCISES = [
   mistakes:['Elbows swinging forward.','Cutting the stretch at the bottom — the stretch is the point of this one.'],
   alternatives:['barbell-curl','cable-curl'] },
 
-{ id:'overhead-triceps-ext', name:'Overhead triceps extension', short:'Overhead ext', day:3, order:8,
+{ id:'overhead-triceps-ext', name:'Overhead triceps extension',
+  viewAngle:'side', short:'Overhead ext', day:3, order:8,
   modality:'load_reps', equipment:'dumbbell', pattern:'elbow extension',
   primary:'triceps', secondary:[], direction:'Weight lowered behind the head and pressed back to lockout.',
   sets:3, lo:12, hi:15, restSec:60, anim:'oht',
@@ -317,7 +346,8 @@ const EXERCISES = [
   alternatives:['triceps-pushdown','close-grip-bench'] },
 
 /* ------------------------------------------------------------- DAY 4: LOWER B */
-{ id:'deadlift-conventional', name:'Conventional deadlift', short:'Deadlift', day:4, order:1,
+{ id:'deadlift-conventional', name:'Conventional deadlift',
+  viewAngle:'side', short:'Deadlift', day:4, order:1,
   modality:'load_reps', equipment:'barbell', pattern:'hinge',
   primary:'posterior chain', secondary:['back','glutes','hamstrings','grip'], direction:'Bar lifted from the floor to a standing lockout.',
   sets:3, lo:3, hi:6, restSec:210, anim:'dead',
@@ -328,7 +358,8 @@ const EXERCISES = [
   alternatives:['deadlift-trap-bar','rdl-barbell'],
   note:'Split from the trap-bar version — different bar path, different history.' },
 
-{ id:'deadlift-trap-bar', name:'Trap-bar deadlift', short:'Trap-bar DL', day:4, order:1,
+{ id:'deadlift-trap-bar', name:'Trap-bar deadlift',
+  viewAngle:'side', short:'Trap-bar DL', day:4, order:1,
   modality:'load_reps', equipment:'barbell', pattern:'hinge',
   primary:'posterior chain', secondary:['quads','glutes','grip'], direction:'Load lifted from the floor inside a hex bar to a standing lockout.',
   sets:3, lo:3, hi:6, restSec:210, anim:'dead_trap',
@@ -338,7 +369,8 @@ const EXERCISES = [
   mistakes:['Letting the bar tip forward or back.','Squatting it so low the back rounds.','Dropping every rep from lockout.'],
   alternatives:['deadlift-conventional','rdl-barbell'] },
 
-{ id:'bulgarian-split-squat', name:'Bulgarian split squat', short:'Split squat', day:4, order:2,
+{ id:'bulgarian-split-squat', name:'Bulgarian split squat',
+  viewAngle:'side', short:'Split squat', day:4, order:2,
   modality:'load_reps', equipment:'dumbbell', pattern:'single-leg squat', perSide:true,
   primary:'quads', secondary:['glutes','adductors'], direction:'Rear foot elevated, front leg bends and drives back up.',
   sets:3, lo:8, hi:12, restSec:120, anim:'bss',
@@ -348,7 +380,8 @@ const EXERCISES = [
   mistakes:['Front foot too close so the knee travels far past the toe.','Pushing off the back foot.','Torso collapsing forward.'],
   alternatives:['walking-lunge','leg-press','step-up'] },
 
-{ id:'hip-thrust', name:'Barbell hip thrust', short:'Hip thrust', day:4, order:3,
+{ id:'hip-thrust', name:'Barbell hip thrust',
+  viewAngle:'side', short:'Hip thrust', day:4, order:3,
   modality:'load_reps', equipment:'barbell', pattern:'hinge',
   primary:'glutes', secondary:['hamstrings'], direction:'Hips driven from the floor up to full extension against a bench.',
   sets:3, lo:10, hi:12, restSec:120, anim:'hip',
@@ -358,7 +391,8 @@ const EXERCISES = [
   mistakes:['Arching the lower back instead of extending the hips.','Feet too close or too far so the hamstrings or quads take over.','Partial lockout.'],
   alternatives:['glute-bridge','rdl-barbell'] },
 
-{ id:'leg-extension', name:'Leg extension', short:'Leg extension', day:4, order:4,
+{ id:'leg-extension', name:'Leg extension',
+  viewAngle:'side', short:'Leg extension', day:4, order:4,
   modality:'load_reps', equipment:'machine', pattern:'knee extension',
   primary:'quads', secondary:[], direction:'Lower legs straighten against the pad.',
   sets:3, lo:12, hi:15, restSec:60, anim:'legext',
@@ -368,7 +402,8 @@ const EXERCISES = [
   mistakes:['Slamming into lockout.','Hips lifting off the seat.','Letting the stack rest at the bottom.'],
   alternatives:['leg-press','squat-barbell'] },
 
-{ id:'lying-leg-curl', name:'Lying leg curl', short:'Lying leg curl', day:4, order:5,
+{ id:'lying-leg-curl', name:'Lying leg curl',
+  viewAngle:'side', short:'Lying leg curl', day:4, order:5,
   modality:'load_reps', equipment:'machine', pattern:'knee flexion',
   primary:'hamstrings', secondary:['calves'], direction:'Heels curled toward the glutes while lying face down.',
   sets:3, lo:12, hi:15, restSec:60, anim:'legcurl2',
@@ -378,7 +413,8 @@ const EXERCISES = [
   mistakes:['Hips popping up to help.','Bouncing out of the bottom.','Partial range.'],
   alternatives:['seated-leg-curl','rdl-barbell'] },
 
-{ id:'seated-calf-raise', name:'Seated calf raise', short:'Seated calf', day:4, order:6,
+{ id:'seated-calf-raise', name:'Seated calf raise',
+  viewAngle:'side', short:'Seated calf', day:4, order:6,
   modality:'load_reps', equipment:'machine', pattern:'ankle extension',
   primary:'calves', secondary:[], direction:'Heels drop then press up with the knees bent.',
   sets:4, lo:15, hi:20, restSec:45, anim:'calf2',
@@ -388,7 +424,8 @@ const EXERCISES = [
   mistakes:['Bouncing.','Tiny range.','Rushing — this one responds to time under tension.'],
   alternatives:['standing-calf-raise'] },
 
-{ id:'ab-wheel-kneeling', name:'Ab wheel rollout (kneeling)', short:'Ab wheel', day:4, order:7, block:'core',
+{ id:'ab-wheel-kneeling', name:'Ab wheel rollout (kneeling)',
+  viewAngle:'side', short:'Ab wheel', day:4, order:7, block:'core',
   modality:'bodyweight_reps', equipment:'bodyweight', pattern:'anti-extension',
   primary:'abs', secondary:['lats','spinal erectors'], direction:'Wheel rolls forward away from the knees and back.',
   sets:4, lo:6, hi:10, restSec:75, anim:'abwheel',
@@ -399,7 +436,8 @@ const EXERCISES = [
   alternatives:['ab-wheel-standing','cable-crunch','plank'],
   progressionNote:'Range comes first. Reps climb to 10 at bodyweight, then range extends toward the standing version.' },
 
-{ id:'ab-wheel-standing', name:'Ab wheel rollout (standing)', short:'Standing ab wheel', day:4, order:7, block:'core',
+{ id:'ab-wheel-standing', name:'Ab wheel rollout (standing)',
+  viewAngle:'side', short:'Standing ab wheel', day:4, order:7, block:'core',
   modality:'weighted_bodyweight', equipment:'bodyweight', pattern:'anti-extension',
   primary:'abs', secondary:['lats'], direction:'Full standing rollout and return.',
   sets:3, lo:3, hi:8, restSec:120, anim:'abwheel_standing',
@@ -410,7 +448,8 @@ const EXERCISES = [
   alternatives:['ab-wheel-kneeling'],
   prerequisite:'ab-wheel-kneeling' },
 
-{ id:'landmine-rotation', name:'Landmine rotation', short:'Landmine rotation', day:4, order:8, block:'core',
+{ id:'landmine-rotation', name:'Landmine rotation',
+  viewAngle:'side-limited', short:'Landmine rotation', day:4, order:8, block:'core',
   modality:'load_reps', equipment:'barbell', pattern:'rotation', perSide:true,
   primary:'obliques', secondary:['abs','shoulders'], direction:'Bar end swings in an arc across the body.',
   sets:3, lo:8, hi:10, restSec:75, anim:'landmine',
@@ -421,9 +460,10 @@ const EXERCISES = [
   alternatives:['pallof-press','cable-woodchop'] },
 
 { id:'farmers-walk', name:"Farmer's walk", short:"Farmer's walk", day:4, order:9, block:'core',
+  viewAngle:'front',
   modality:'carry', equipment:'dumbbell', pattern:'loaded carry',
   primary:'trunk', secondary:['traps','grip','glutes'], direction:'Walk a set distance with heavy load in both hands.',
-  sets:3, lo:40, hi:40, restSec:120, anim:'farmer', unit:'m',
+  sets:3, lo:40, hi:40, restSec:120, anim:'farmer_front', unit:'m',
   setup:['Two heavy dumbbells at the sides.','Stand tall, shoulders back before the first step.'],
   execution:['Walk the distance tall and controlled.','Set them down, do not drop them.'],
   breathing:'Steady breathing throughout.',
@@ -496,7 +536,14 @@ EXERCISES.forEach(e => {
     licence: 'Original work',
     reviewed: false,
     reviewer: null,
-    status: e.anim ? 'unreviewed-original' : 'gap-no-asset',
+    status: e.anim ? 'provisional-unreviewed-original' : 'gap-no-asset',
+    viewAngle: e.viewAngle || 'side',
+    viewNote:
+      e.viewAngle === 'front'
+        ? 'Drawn from the front because the movement happens in the frontal plane; a side view would misrepresent it.'
+      : e.viewAngle === 'side-limited'
+        ? 'Side view. The anti-rotation or rotational component is not visible from any single 2D angle — read the written cues, not the figure.'
+        : 'Side view. Grip width, foot angle and frontal-plane detail are not represented.',
     textAlternative: !!e.direction,
     cueSource: 'Written by the app author from general training practice. Unreviewed.'
   });

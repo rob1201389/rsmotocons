@@ -46,8 +46,77 @@ function blankFeedback() {
   return { effort: null, reserve: null, technique: null, capacity: null, pain: null, at: null };
 }
 /* Pain is its own object and is never coerced into a number. */
+/* Pain is described, not scored. The flags below are the ones that route to
+   review on their own, regardless of how low the number is: a 2/10 that is
+   sharp, or comes with numbness, is not a 2/10 worth training through. */
+const CONCERNING_PAIN_FLAGS = ['sharp', 'swelling', 'numbness', 'givingWay', 'night', 'worsening'];
 function blankPain() {
-  return { present: false, location: null, severity: null, note: null, duringOrAfter: null };
+  return { present: false, location: null, severity: null, note: null, duringOrAfter: null,
+           sharp: false, swelling: false, numbness: false, givingWay: false,
+           night: false, worsening: false };
+}
+function painIsConcerning(pain) {
+  if (!pain || !pain.present) return false;
+  if (CONCERNING_PAIN_FLAGS.some(f => pain[f])) return true;
+  return pain.severity != null && Number(pain.severity) >= 5;
+}
+function concerningReasons(pain) {
+  const out = [];
+  if (pain.sharp) out.push('you described it as sharp');
+  if (pain.numbness) out.push('you reported numbness');
+  if (pain.givingWay) out.push('the joint gave way');
+  if (pain.swelling) out.push('there is swelling');
+  if (pain.night) out.push('it wakes you at night');
+  if (pain.worsening) out.push('it is getting worse');
+  if (pain.severity != null && Number(pain.severity) >= 5) out.push(`you rated it ${pain.severity} out of 10`);
+  return out;
+}
+
+/* ---- persistent pain concerns -------------------------------------------
+   A concerning report opens a concern that stays open until the user clears
+   it. It does not evaporate because the next session happened to be quiet. */
+function openPainConcern(state, pain, variantId, dateISO) {
+  state.painConcerns = state.painConcerns || [];
+  const existing = state.painConcerns.find(c =>
+    c.status === 'open' && c.variantId === variantId && c.location === pain.location);
+  if (existing) {
+    existing.lastReported = dateISO;
+    existing.reports = (existing.reports || 1) + 1;
+    return existing;
+  }
+  const c = {
+    id: 'pc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    variantId, location: pain.location || null,
+    severity: pain.severity != null ? Number(pain.severity) : null,
+    flags: CONCERNING_PAIN_FLAGS.filter(f => pain[f]),
+    note: pain.note || null,
+    openedOn: dateISO, lastReported: dateISO, reports: 1,
+    status: 'open', resolvedOn: null, resolution: null
+  };
+  state.painConcerns.push(c);
+  return c;
+}
+function resolvePainConcern(state, id, dateISO, resolution) {
+  const c = (state.painConcerns || []).find(x => x.id === id);
+  if (!c) return null;
+  c.status = 'resolved'; c.resolvedOn = dateISO; c.resolution = resolution || null;
+  return c;
+}
+function openConcernFor(state, variantId) {
+  return (state.painConcerns || []).find(c => c.status === 'open' && c.variantId === variantId) || null;
+}
+/* Scan history and open a concern for every concerning report not yet tracked. */
+function syncPainConcerns(state) {
+  (state.sessions || []).forEach(sess => {
+    if (sess.status !== 'completed') return;
+    (sess.entries || []).forEach(e => {
+      const p = e.feedback && e.feedback.pain;
+      if (painIsConcerning(p)) openPainConcern(state, p, e.variantId, sess.date);
+    });
+    const cp = sess.checkin && sess.checkin.pain;
+    if (painIsConcerning(cp)) openPainConcern(state, cp, cp.location ? ('area:' + cp.location) : 'session', sess.date);
+  });
+  return state.painConcerns || [];
 }
 
 /* ----------------------------------------------------------- readiness
@@ -87,11 +156,16 @@ function incrementFor(ex, profile) {
   const inc = (profile && profile.increments) || {};
   return inc[ex.equipment] != null ? inc[ex.equipment] : (inc[ex.modality] || 2.5);
 }
+/* Returns the load increase that is allowed, or 0 when the smallest increment
+   the gym can actually make is larger than the configured cap. Previously this
+   computed max() then min() of the same pair and always returned `increment`,
+   so the cap never applied. */
 function capJump(current, increment, profile) {
   const pct = (profile && profile.maxLoadJumpPct) || TUNING.maxJumpPctDefault;
-  if (!current) return increment;
-  const maxDelta = Math.max(increment, (current * pct) / 100);
-  return Math.min(increment, maxDelta);
+  if (!current) return increment;          // no baseline: nothing to cap against
+  const cap = (current * pct) / 100;
+  if (increment > cap) return 0;           // cannot move load without overshooting
+  return increment;
 }
 function roundToIncrement(w, inc) {
   if (!inc) return Math.round(w * 2) / 2;
@@ -157,34 +231,78 @@ function decide(ctx) {
   const mod = MODALITY[ex.modality] || MODALITY.load_reps;
   const inc = incrementFor(ex, profile);
   const ready = readiness(ctx.checkin);
+  const today0 = ctx.todayISO;
 
-  /* ---------- 0. PAIN GATE. Separate pathway, evaluated first, never averaged. */
+  /* ---------- 0. PAIN GATE. Separate pathway, evaluated first, never averaged.
+        A low number does not authorise training through a concerning report. */
+  syncPainConcerns(state);
   const sessionPain = ctx.checkin && ctx.checkin.pain && ctx.checkin.pain.present ? ctx.checkin.pain : null;
   const lastPain = fb && fb.pain && fb.pain.present ? fb.pain : null;
   const pain = lastPain || sessionPain;
-  if (pain) {
-    push('pain.gate', `Pain reported${pain.location ? ' at ' + pain.location : ''}${pain.severity ? ', severity ' + pain.severity : ''}`);
-    const severe = pain.severity != null && Number(pain.severity) >= 5;
-    const action = severe ? 'review' : 'reduce';
-    const base = baselineFrom(last, ex, inc);
-    const presc = severe
-      ? null
-      : buildPrescription(ex, scaleLoad(base, 0.8, inc), targetReps(ex, 'low'), ex.sets, mod);
+  const standingConcern = openConcernFor(state, ctx.variantId);
+
+  if (pain && painIsConcerning(pain)) {
+    const why = concerningReasons(pain);
+    push('pain.concerning', `Pain at ${pain.location || 'an unspecified site'}: ${why.join('; ')}`);
+    if (ctx.todayISO) openPainConcern(state, pain, ctx.variantId, ctx.todayISO);
     return finish({
-      action,
-      prescription: presc,
-      pain: { ...pain, pathway: 'separate' },
+      action: 'review', paused: true, prescription: null,
+      pain: { ...pain, pathway: 'separate', concerning: true },
+      resumeOptions: [
+        { id: 'substitute', label: 'Train something else today',
+          detail: 'Pick an alternative that does not load the painful area.' },
+        { id: 'skip', label: 'Skip this exercise',
+          detail: 'Leave it out. Nothing is logged and nothing progresses.' },
+        { id: 'clear', label: 'Mark the concern resolved',
+          detail: 'Only once it is genuinely pain-free, or a clinician has cleared you.' }
+      ],
       explain: {
-        what: severe
-          ? 'This exercise is paused pending review.'
-          : 'Load cut to about 80% and reps kept to the lower end.',
-        why: `You reported pain${pain.location ? ' at the ' + pain.location : ''} on this movement. Pain is handled on its own pathway and is never mixed into effort or readiness.`,
-        next: severe
-          ? 'Nothing is prescribed until you clear it or choose to substitute. This app does not diagnose injuries or prescribe rehabilitation — a qualified clinician should look at it.'
-          : 'If it is pain-free at this load, the normal rules resume next session. If it hurts again, the exercise pauses for review.'
+        what: `${ex.name} is paused. No sets are prescribed.`,
+        why: `You reported pain at the ${pain.location || 'affected area'} and ${why.join(', and ')}. ` +
+             `That is handled on its own pathway — it is never mixed into effort or readiness, and a low rating does not override it.`,
+        next: 'It stays paused until you mark the concern resolved or choose a substitute. ' +
+              'This app does not diagnose injuries and does not prescribe rehabilitation — a qualified clinician should look at it.'
       },
-      flags: ['pain'],
-      trace, ready, confidence: 'n/a'
+      flags: ['pain', 'paused'], trace, ready, confidence: 'n/a'
+    });
+  }
+
+  if (standingConcern) {
+    push('pain.unresolved', `Open concern at ${standingConcern.location || 'unspecified'} since ${standingConcern.openedOn}`);
+    return finish({
+      action: 'review', paused: true, prescription: null,
+      resumeOptions: [
+        { id: 'substitute', label: 'Train something else', detail: 'Keep working around it.' },
+        { id: 'skip', label: 'Skip this exercise', detail: 'Leave it out today.' },
+        { id: 'clear', label: 'Mark the concern resolved', detail: 'Clears the pause and the normal rules resume.' }
+      ],
+      explain: {
+        what: `${ex.name} is still paused from an earlier report.`,
+        why: `You reported concerning pain on this movement on ${standingConcern.openedOn} and it has not been marked resolved. ` +
+             `A quiet session since then is not the same as the concern being cleared, so it does not reopen on its own.`,
+        next: 'Clear the concern when it is genuinely pain-free, or substitute. ' +
+              'This app does not diagnose injuries and does not prescribe rehabilitation.'
+      },
+      flags: ['pain_unresolved', 'paused'], trace, ready, confidence: 'n/a'
+    });
+  }
+
+  if (pain) {   // present but not concerning: back off, keep training, stay watchful
+    push('pain.mild', `Mild pain reported${pain.location ? ' at ' + pain.location : ''}`);
+    const base0 = baselineFrom(last, ex, inc);
+    return finish({
+      action: 'reduce',
+      prescription: buildPrescription(ex, scaleLoad(base0, 0.8, inc), targetReps(ex, 'low'), ex.sets, mod),
+      pain: { ...pain, pathway: 'separate', concerning: false },
+      explain: {
+        what: 'Load cut to about 80% and reps kept to the lower end.',
+        why: `You reported pain${pain.location ? ' at the ' + pain.location : ''} without any of the signs that would pause it outright. ` +
+             `Pain is handled on its own pathway and is never mixed into effort or readiness.`,
+        next: 'If it is pain-free at this load, the normal rules resume next session. ' +
+              'If it sharpens, spreads, or you notice numbness or swelling, it pauses for review. ' +
+              'This app does not diagnose injuries and does not prescribe rehabilitation.'
+      },
+      flags: ['pain'], trace, ready, confidence: 'n/a'
     });
   }
 
@@ -234,6 +352,24 @@ function decide(ctx) {
     push('readiness', `Readiness ${ready.score}/10`);
   } else {
     push('readiness.unknown', 'No check-in — readiness unknown, treated neutrally');
+  }
+
+  /* ---------- 3a. ACTIVE DELOAD — an accepted deload changes the prescription. */
+  const dl = inDeload(state, today);
+  if (dl) {
+    const light = scaleLoad(base, dl.factor, inc);
+    push('deload.active', `Deload ${dl.startDate} to ${dl.endDate}, factor ${dl.factor}`);
+    return finish({
+      action: 'deload',
+      prescription: buildPrescription(ex, light, targetReps(ex, 'mid'), ex.sets, mod),
+      explain: {
+        what: `Easy week: ${fmtLoad(light, ex)}, about ${Math.round(dl.factor * 100)}% of your working load.`,
+        why: `You accepted a deload running ${dl.startDate} to ${dl.endDate}. Every set this week is deliberately light — ` +
+             `the point is to shed fatigue, so stopping well short on each set is the instruction, not a failure.`,
+        next: `Normal progression resumes automatically after ${dl.endDate}. Nothing you do this week counts against you.`
+      },
+      flags: ['deload'], trace, ready, confidence: 'high'
+    });
   }
 
   /* ---------- 3b. PLATEAU — checked before the individual hold reasons, so a
@@ -316,6 +452,26 @@ function decide(ctx) {
   const neededLess = cap === 'needed_less';
   const reserveUnknown = reserve == null;
 
+  // 8a0. "Needed less" means the load was too much. It is a back-off signal and
+  //      must be evaluated BEFORE anything that could raise the load. It used to
+  //      sit inside the reserve guard as an exemption, which let it progress.
+  if (neededLess) {
+    push('capacity.needed_less', 'User reported the session needed less work');
+    const heavy = maxedOut || nearLimit || noReserve;
+    const newLoad = heavy ? scaleLoad(base, 0.95, inc) : base;
+    return finish({
+      action: heavy ? 'reduce' : 'hold',
+      prescription: buildPrescription(ex, newLoad, targetReps(ex, 'mid'), ex.sets, mod),
+      explain: {
+        what: heavy ? `Load eased back to ${fmtLoad(newLoad, ex)}.` : `Holding ${fmtLoad(base, ex)}.`,
+        why: 'You finished the reps but said you needed less work than this. That is a signal the dose was too high, ' +
+             'so it is treated as a reason to back off, never as permission to add load — whatever the reps said.',
+        next: `Repeat ${fmtLoad(newLoad, ex)} and see how it lands. It moves up only when it comes back manageable with reps to spare.`
+      },
+      flags: ['needed_less'], trace, ready, confidence: 'high'
+    });
+  }
+
   // 8a. Maximum effort or nothing left in the tank: a successful grind is not a
   //     mandate to add load. Repeat it and earn it with room to spare.
   if (maxedOut || noReserve) {
@@ -378,7 +534,7 @@ function decide(ctx) {
   }
 
   // 8e. Not enough in reserve.
-  if (reserve != null && reserve < TUNING.reserveProgressMin && !neededLess) {
+  if (reserve != null && reserve < TUNING.reserveProgressMin) {
     push('reserve.low', `Only ${reserve} rep(s) in reserve, need ${TUNING.reserveProgressMin}`);
     return finish({
       action: 'hold',
@@ -460,8 +616,54 @@ function progressDecision(ex, base, inc, mod, profile, trace, ready, ev) {
   }
 
   // Default: load-based (including carries, where distance is fixed).
-  const rawInc = capJump(base, incrementFor(ex, profile), profile);
-  const next = roundToIncrement(base + rawInc, incrementFor(ex, profile));
+  const smallest = incrementFor(ex, profile);
+  const rawInc = capJump(base, smallest, profile);
+  if (rawInc === 0) {
+    // The smallest weight this gym can add is a bigger jump than the cap allows.
+    // Chase reps to the top of the range instead of overshooting silently.
+    const pct = (profile && profile.maxLoadJumpPct) || TUNING.maxJumpPctDefault;
+    const asPct = base ? ((smallest / base) * 100).toFixed(0) : '?';
+    const atTop = (ev.sum.repsAtWorkingWeight[0] || 0) >= ex.hi;
+    const noAltDimension = ex.lo === ex.hi;   // carries: distance is fixed, nothing else to move
+    if (noAltDimension) {
+      // Blocking here would stall the exercise permanently, so the increment is
+      // allowed and the overshoot is stated rather than hidden.
+      const forced = roundToIncrement(base + smallest, smallest);
+      trace.push({ rule: 'progress.load.over_cap', detail: `${asPct}% jump allowed: no other dimension to progress` });
+      return {
+        action: 'progress',
+        prescription: buildPrescription(ex, forced, targetReps(ex, 'fixed'), ex.sets, mod),
+        explain: {
+          what: `Load up ${smallest} kg to ${forced} kg.`,
+          why: `You earned the increase. This is a ${asPct}% jump, slightly over your ${pct}% cap, ` +
+               `but the distance on a carry is fixed and ${smallest} kg is the smallest load you have — ` +
+               `holding would stall it indefinitely, so the jump is taken and flagged rather than hidden.`,
+          next: `Carry ${forced} kg for the full ${ex.hi} m walking tall. Distance stays fixed; load is the only thing that moves. If it is a step too far, log what you actually managed and it will come back down.`
+        },
+        flags: ['progress_load', 'increment_over_cap'], trace, ready, confidence: 'medium'
+      };
+    }
+    trace.push({ rule: 'progress.load.blocked', detail: `smallest increment ${smallest}kg = ${asPct}% of ${base}kg, cap ${pct}%` });
+    return {
+      action: 'hold',
+      prescription: buildPrescription(ex, base,
+        atTop ? targetReps(ex, 'high') : { lo: Math.min(ex.hi, (ev.sum.minReps || ex.lo) + 1), hi: ex.hi },
+        ex.sets, mod),
+      explain: {
+        what: atTop
+          ? `Staying at ${fmtLoad(base, ex)} — the load cannot move yet.`
+          : `Staying at ${fmtLoad(base, ex)} and chasing reps to ${ex.hi}.`,
+        why: `You earned an increase, but the smallest increment you have for this exercise is ${smallest} kg, ` +
+             `which is ${asPct}% of ${base} kg — over your ${pct}% cap. Rather than quietly making a jump that big, ` +
+             `the load holds and the reps do the work.`,
+        next: atTop
+          ? `To move the load you need a smaller increment — micro-plates, or a different implement. You can also raise the cap in Profile if ${asPct}% is a jump you are happy with.`
+          : `Build to ${ex.hi} reps on every set at ${fmtLoad(base, ex)}. That is real progress at the same load.`
+      },
+      flags: ['increment_blocked'], trace, ready, confidence: 'high'
+    };
+  }
+  const next = roundToIncrement(base + rawInc, smallest);
   const delta = Math.round((next - base) * 100) / 100;
   trace.push({ rule: 'progress.load', detail: `${base} -> ${next} (+${delta})` });
   const isCarry = ex.modality === 'carry';
@@ -543,6 +745,8 @@ function finish(d) {
 function proposeDeload(state, todayStr) {
   const sessions = (state.sessions || []).filter(s => s.status === 'completed');
   if (!sessions.length) return null;
+  if (state.activeDeload && state.activeDeload.status === 'active') return null;
+  if (state.deloadDismissedUntil && todayStr && todayStr < state.deloadDismissedUntil) return null;
   const weeksTrained = new Set(sessions.map(s => s.date.slice(0, 4) + weekOf(s.date))).size;
   const every = (state.profile && state.profile.deloadEveryWeeks) || TUNING.deloadEveryWeeks;
   const lastDeload = state.lastDeloadWeek || 0;
@@ -580,6 +784,195 @@ function weekOf(iso) {
   return String(Math.ceil(((dt - jan1) / 86400000 + jan1.getDay() + 1) / 7)).padStart(2, '0');
 }
 
+
+/* ============================================================================
+   SESSION SHORTENING — advice that actually changes the roster
+   The old sessionPlanAdvice announced a trim and then handed back the full
+   roster, so the explanation described a workout that never happened.
+   ========================================================================== */
+function exerciseTier(ex, idx) {
+  // 0 = the lifts the session exists for, 1 = accessories, 2 = core/finishers
+  if (ex.block === 'core') return 2;
+  const main = ['squat', 'hinge', 'horizontal push', 'horizontal pull',
+                'vertical push', 'vertical pull', 'single-leg squat'];
+  if (main.indexOf(ex.pattern) >= 0 && idx < 4) return 0;
+  return 1;
+}
+function applySessionPlan(roster, checkin, profile) {
+  const planned = (profile && profile.sessionMinutes) || 60;
+  const avail = checkin && checkin.timeAvailableMin;
+  const full = { kept: roster.slice(), dropped: [], shortened: false,
+                 explain: { what: `Full session: all ${roster.length} exercises.`,
+                            why: 'You have the time for the whole session.',
+                            next: 'Work through it in order.' } };
+  if (!avail || avail >= planned * 0.75) return full;
+
+  const target = Math.max(2, Math.round(roster.length * (avail / planned)));
+  if (target >= roster.length) return full;
+
+  const ranked = roster.map((ex, idx) => ({ ex, idx, tier: exerciseTier(ex, idx) }))
+    .sort((a, b) => a.tier - b.tier || a.idx - b.idx);
+  const keepSet = new Set(ranked.slice(0, target).map(r => r.idx));
+  const kept = roster.filter((_, i) => keepSet.has(i));
+  const dropped = roster.filter((_, i) => !keepSet.has(i));
+
+  return {
+    kept, dropped, shortened: true,
+    explain: {
+      what: `Session trimmed to ${kept.length} exercises: ${kept.map(e => e.short).join(', ')}.`,
+      why: `You have ${avail} minutes against a ${planned}-minute session. The compounds are kept and ` +
+           `${dropped.length} accessor${dropped.length === 1 ? 'y is' : 'ies are'} dropped — ` +
+           `rushing the main lifts to fit the small stuff in is the wrong trade.`,
+      next: `${dropped.map(e => e.short).join(', ')} ${dropped.length === 1 ? 'is' : 'are'} not owed back. ` +
+            `They roll into the next session of this day.`
+    }
+  };
+}
+
+/* ============================================================================
+   DELOAD — accepted deloads actually change prescriptions, within dated bounds
+   ========================================================================== */
+const DELOAD_FACTOR = 0.6;
+const DELOAD_DAYS = 7;
+
+function acceptDeload(state, startISO) {
+  const start = startISO || (typeof todayISO === 'function' ? todayISO() : null);
+  const end = addDaysSafe(start, DELOAD_DAYS - 1);
+  state.activeDeload = {
+    id: 'dl_' + Date.now().toString(36),
+    startDate: start, endDate: end,
+    factor: DELOAD_FACTOR, acceptedAt: Date.now(), status: 'active'
+  };
+  delete state.deloadDismissedUntil;
+  return state.activeDeload;
+}
+function dismissDeload(state, todayStr) {
+  const t = todayStr || (typeof todayISO === 'function' ? todayISO() : null);
+  state.deloadDismissedUntil = addDaysSafe(t, 7);
+  return state.deloadDismissedUntil;
+}
+function inDeload(state, todayStr) {
+  const d = state.activeDeload;
+  if (!d || d.status !== 'active') return null;
+  if (todayStr < d.startDate || todayStr > d.endDate) return null;
+  return d;
+}
+/* Called on load and after each session: retires a deload once its window ends. */
+function closeDeloadIfDue(state, todayStr) {
+  const d = state.activeDeload;
+  if (!d) return null;
+  if (todayStr <= d.endDate) return null;
+  d.status = 'completed'; d.closedOn = todayStr;
+  state.deloadHistory = (state.deloadHistory || []).concat([d]);
+  state.lastDeloadOn = d.endDate;
+  delete state.activeDeload;
+  return d;
+}
+
+/* ============================================================================
+   PROGRAMME GENERATION — goal, experience, availability and time actually
+   decide the split, the exercise count, the sets and the rep ranges.
+   ========================================================================== */
+const GOAL_PRESCRIPTION = {
+  strength:    { lo: 3,  hi: 6,  setBias:  1, rest: 'long',   label: 'strength' },
+  hypertrophy: { lo: 8,  hi: 12, setBias:  0, rest: 'medium', label: 'hypertrophy' },
+  recomp:      { lo: 6,  hi: 10, setBias:  0, rest: 'medium', label: 'recomposition' },
+  fatloss:     { lo: 10, hi: 15, setBias: -1, rest: 'short',  label: 'fat loss' }
+};
+const EXPERIENCE_SETS = { novice: 2, intermediate: 3, advanced: 4 };
+
+const SPLITS = {
+  2: [['full', 'Full body A'], ['full', 'Full body B']],
+  3: [['full', 'Full body A'], ['full', 'Full body B'], ['full', 'Full body C']],
+  4: [['upper', 'Upper A'], ['lower', 'Lower A'], ['upper', 'Upper B'], ['lower', 'Lower B']],
+  5: [['upper', 'Upper A'], ['lower', 'Lower A'], ['push', 'Push'], ['pull', 'Pull'], ['lower', 'Lower B']],
+  6: [['push', 'Push A'], ['pull', 'Pull A'], ['lower', 'Lower A'],
+      ['push', 'Push B'], ['pull', 'Pull B'], ['lower', 'Lower B']]
+};
+const DAY_PATTERN = {
+  full:  ['legs', 'push', 'pull', 'legs', 'push', 'pull', 'core', 'core'],
+  upper: ['push', 'pull', 'push', 'pull', 'push', 'pull', 'core', 'core'],
+  lower: ['legs', 'legs', 'legs', 'legs', 'core', 'core', 'legs', 'core'],
+  push:  ['push', 'push', 'push', 'push', 'core', 'push', 'core', 'core'],
+  pull:  ['pull', 'pull', 'pull', 'pull', 'core', 'pull', 'core', 'core']
+};
+function groupOf(ex) {
+  if (ex.block === 'core') return 'core';
+  const p = ex.pattern || '';
+  if (/push|press|adduction|abduction|elbow extension/.test(p)) return 'push';
+  if (/pull|row|flexion$|elbow flexion/.test(p)) return 'pull';
+  if (/squat|hinge|knee|ankle|leg/.test(p)) return 'legs';
+  if (/anti-|rotation|carry/.test(p)) return 'core';
+  return 'push';
+}
+function equipmentAvailable(ex, equipment) {
+  const map = { barbell: 'barbell', dumbbell: 'dumbbell', machine: 'machine',
+                cable: 'cable', bodyweight: null, assisted: 'machine' };
+  const need = map[ex.equipment];
+  if (!need) return true;
+  return (equipment || {})[need] !== false;   // only an explicit false excludes
+}
+function buildProgram(profile, allExercises) {
+  const days = Math.max(2, Math.min(6, profile.trainingDaysPerWeek || 4));
+  const goal = GOAL_PRESCRIPTION[profile.goal] || GOAL_PRESCRIPTION.recomp;
+  const baseSets = EXPERIENCE_SETS[profile.experience] != null
+    ? EXPERIENCE_SETS[profile.experience] : EXPERIENCE_SETS.intermediate;
+  const mins = profile.sessionMinutes || 60;
+  const perDay = Math.max(3, Math.min(8, Math.round((mins - 8) / 9)));
+  const split = SPLITS[days] || SPLITS[4];
+  const notes = [];
+
+  const pool = allExercises.filter(e => !e.prerequisite);   // start at the base variant
+  const byGroup = {};
+  pool.forEach(e => { (byGroup[groupOf(e)] = byGroup[groupOf(e)] || []).push(e); });
+  Object.keys(byGroup).forEach(g => byGroup[g].sort((a, b) => a.day - b.day || a.order - b.order));
+
+  const used = new Set();
+  const out = split.map(([kind, name], di) => {
+    const wanted = DAY_PATTERN[kind].slice(0, perDay);
+    const picks = [];
+    wanted.forEach(group => {
+      const candidates = (byGroup[group] || []);
+      let pick = candidates.find(e => !used.has(e.id) && equipmentAvailable(e, profile.equipment));
+      if (!pick) {
+        // fall back to another group rather than letting the day collapse
+        for (const g of ['push', 'pull', 'legs', 'core']) {
+          pick = (byGroup[g] || []).find(e => !used.has(e.id) && equipmentAvailable(e, profile.equipment));
+          if (pick) { notes.push(`${name}: no ${group} exercise left that fits your equipment, used ${pick.short} instead.`); break; }
+        }
+      } else if (candidates.some(e => !used.has(e.id) && !equipmentAvailable(e, profile.equipment)) &&
+                 candidates.indexOf(pick) > 0) {
+        const skipped = candidates.find(e => !used.has(e.id) && !equipmentAvailable(e, profile.equipment));
+        if (skipped && skipped.order < pick.order) {
+          notes.push(`${skipped.short} needs ${skipped.equipment}, which you have turned off — substituted ${pick.short}.`);
+        }
+      }
+      if (!pick) return;
+      used.add(pick.id);
+      const isCore = pick.block === 'core';
+      const sets = Math.max(2, baseSets + goal.setBias + (isCore ? 0 : 1) - (picks.length > 3 ? 1 : 0));
+      // a movement's own range still bounds the goal range
+      const lo = Math.max(pick.lo, Math.min(goal.lo, pick.hi));
+      const hi = Math.min(Math.max(pick.hi, lo), Math.max(goal.hi, lo));
+      picks.push({ ex: pick, id: pick.id, sets, repsLow: lo, repsHigh: hi,
+                   restSec: pick.restSec, group });
+    });
+    return { index: di + 1, kind, name, exercises: picks };
+  });
+
+  const totalSets = out.reduce((a, d) => a + d.exercises.reduce((b, e) => b + e.sets, 0), 0);
+  const explain =
+    `${days} days a week, ${mins} minutes a session, built for ${goal.label}. ` +
+    `That gives ${perDay} exercises a day in the ${goal.lo}–${goal.hi} rep range, ` +
+    `${totalSets} working sets a week at ${profile.experience || 'intermediate'} volume.` +
+    (notes.length ? ` ${notes.length} substitution${notes.length === 1 ? '' : 's'} were made for your equipment.` : '');
+
+  return { days: out, notes, explain, goal: goal.label, perDay, totalSets,
+            generatedAt: Date.now(), inputs: {
+              trainingDaysPerWeek: days, goal: profile.goal, experience: profile.experience,
+              sessionMinutes: mins } };
+}
+
 /* ============================================================================
    Session-level advice from the check-in (time, energy, pain)
    ========================================================================== */
@@ -590,9 +983,9 @@ function sessionPlanAdvice(checkin, plannedMinutes, exerciseCount) {
   if (checkin.timeAvailableMin && plannedMinutes && checkin.timeAvailableMin < plannedMinutes * 0.75) {
     const keep = Math.max(2, Math.round(exerciseCount * (checkin.timeAvailableMin / plannedMinutes)));
     out.push({
-      action: 'shorten',
+      action: 'shorten', keep, dropped: Math.max(0, exerciseCount - keep),
       explain: {
-        what: `Session trimmed to the first ${keep} exercises.`,
+        what: `Session trimmed to ${keep} exercises.`,
         why: `You have ${checkin.timeAvailableMin} minutes against a ${plannedMinutes}-minute session. Rushing the compounds to fit the accessories in is the wrong trade.`,
         next: 'The dropped accessories are not owed back — they roll into the next session of this day.'
       }
@@ -660,6 +1053,11 @@ if (typeof module !== 'undefined' && module.exports) {
     TUNING, EFFORT_SCALE, RESERVE_SCALE, TECHNIQUE, CAPACITY, MODALITY,
     blankFeedback, blankPain, blankCheckin, readiness,
     decide, proposeDeload, sessionPlanAdvice, consecutiveHolds, recentWorkload,
-    incrementFor, capJump, roundToIncrement, targetReps, COACHING_ASSUMPTIONS
+    incrementFor, capJump, roundToIncrement, targetReps, COACHING_ASSUMPTIONS,
+    applySessionPlan, exerciseTier,
+    acceptDeload, dismissDeload, inDeload, closeDeloadIfDue,
+    buildProgram, groupOf, equipmentAvailable, GOAL_PRESCRIPTION, EXPERIENCE_SETS,
+    painIsConcerning, concerningReasons, CONCERNING_PAIN_FLAGS,
+    openPainConcern, resolvePainConcern, openConcernFor, syncPainConcerns
   };
 }
