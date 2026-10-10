@@ -19,6 +19,7 @@ export default {
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
     }
+    try {
     const db = d1Db(env.DB);
     if (!bootstrapped) {
       const r = await bootstrapOwner(db, env, Date.now());
@@ -31,5 +32,13 @@ export default {
     out.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
     out.headers.set('X-Frame-Options', 'DENY');
     return out;
+    } catch (e) {
+      // Plain JSON instead of Cloudflare's error page; detail stays in the log.
+      console.error('api error:', e && e.message);
+      return new Response(JSON.stringify({ error: 'Server error.' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+      });
+    }
   }
 };
