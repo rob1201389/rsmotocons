@@ -1,0 +1,471 @@
+{
+ "key": "privacy",
+ "title": "Privacy policy",
+ "version": "2026-10-11.1",
+ "updated": "2026-10-11",
+ "status": "draft",
+ "summary": "How Recomp collects, uses, shares and protects your information, and how to control it.",
+ "overview": [
+  {
+   "t": "ul",
+   "items": [
+    "Recomp keeps your account details and your training, food, sleep and heart rate records so it can run your plan. Health information is used only with your consent.",
+    "Nobody else reads your training records unless you have an assigned coach and sharing is on. Administrators manage accounts but cannot read your training without being assigned.",
+    "AI review wording is off unless you turn it on. When on, the week's review details (not your name or email) go to Anthropic.",
+    "No analytics, no advertising, no selling of data.",
+    "Download or delete everything from Settings at any time. Deletion is immediate; backups expire within 30 days.",
+    "Questions: {{operator.privacyEmail}}. [Read the full policy below.](#who-we-are)"
+   ]
+  }
+ ],
+ "blocks": [
+  {
+   "t": "h2",
+   "id": "who-we-are",
+   "text": "Who we are and how to contact us"
+  },
+  {
+   "t": "p",
+   "text": "Recomp is operated by {{operator.legalName}} (trading as {{operator.name}}), ABN {{operator.abn}}, based in {{operator.country}}. In this policy \"we\" and \"us\" means the operator."
+  },
+  {
+   "t": "p",
+   "text": "For any privacy question or request, email {{operator.privacyEmail}} or write to {{operator.address}}. We aim to reply within 30 days."
+  },
+  {
+   "t": "p",
+   "text": "Recomp is run from Australia, so the Australian Privacy Act 1988 and the Australian Privacy Principles are the starting point for this policy. Some sections also explain the rights people in other places may have. We do not claim that Recomp meets every privacy law in every country."
+  },
+  {
+   "t": "h2",
+   "id": "what-we-collect",
+   "text": "What we collect"
+  },
+  {
+   "t": "h3",
+   "id": "account-data",
+   "text": "Account and sign-in information"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "Your name, email address or login name, and a scrambled copy (hash) of your password. We never see or store your actual password.",
+    "Your role, account status, when your account was requested, approved and last used, and the IP address of your most recent sign-in.",
+    "Two-step verification settings: a scrambled copy of your recovery codes and, if you add them, your passkeys' public keys. Passkeys never give us your fingerprint or face.",
+    "A record of your sign-in sessions (when they started and were last used, a short device label such as \"Safari on iPhone\", and the IP address and browser details used).",
+    "Your consent records: when you read which version of this policy, and whether you agreed to the use of your health information."
+   ]
+  },
+  {
+   "t": "h3",
+   "id": "training-data",
+   "text": "Training, measurements and nutrition records"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "Your goals, available days, session length, equipment, preferences and any limitations you choose to record.",
+    "Your plan and its history, the workouts you log (exercises, sets, weights, reps, effort and technique ratings), stretch and recovery sessions, and readiness check-ins (energy, sleep, soreness).",
+    "Bodyweight entries and the daily calories and protein you choose to log. The suggested meal plan is a calculation, not a record of what you ate.",
+    "Weekly reviews: your check-in answers, the statistics the app calculated, the plan changes you accepted or declined, and any AI-written wording (if you turned that on)."
+   ]
+  },
+  {
+   "t": "h3",
+   "id": "written-updates",
+   "text": "Written updates, pain reports and coach feedback"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "Training updates you write, including anything you say about pain or discomfort. Pain reports are kept so the app can stop increasing loads on that exercise. Recomp does not diagnose anything.",
+    "Weekly reports you choose to send to an assigned coach, the coach's replies and decisions, and messages on workout reviews.",
+    "Requests you send to the administrator (for example to correct something)."
+   ]
+  },
+  {
+   "t": "h3",
+   "id": "imported-data",
+   "text": "Wellness data you import"
+  },
+  {
+   "t": "p",
+   "text": "If you import files from Garmin (Garmin Connect CSV exports, TCX activity files or the sleep file from a Garmin data export), Recomp keeps only these items: the date, sleep duration and sleep score; and for activities, the type, duration, distance, calories, average heart rate and maximum heart rate. Heart rate variability (HRV), stress, location and GPS tracks are not imported. Files are read on your device; the file itself is not uploaded, only the rows you import become part of your account data."
+  },
+  {
+   "t": "p",
+   "text": "Recomp is not connected to your Garmin account and does not sync automatically."
+  },
+  {
+   "t": "h3",
+   "id": "technical-data",
+   "text": "Technical information"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "IP addresses and browser details, used to keep sign-in secure, to limit repeated failed attempts, and recorded in the security log.",
+    "A security log of important events (for example sign-ins, password changes, permission changes, data exports and account deletion). It records what happened and when, not the content of your records."
+   ]
+  },
+  {
+   "t": "p",
+   "text": "We do not use analytics, advertising or tracking tools, and we do not sell personal information."
+  },
+  {
+   "t": "h2",
+   "id": "health-information",
+   "text": "Health and wellness information"
+  },
+  {
+   "t": "p",
+   "text": "Training records, body measurements, food records, sleep and heart rate data, readiness ratings and pain reports are **health information**. Australian law treats health information as sensitive information, and so do the laws of the EU, the UK and several US states. We collect it only with your consent, which you give separately from reading this policy when you create an account. You can withdraw that consent in Settings. If you do, Recomp stops saving new training data and stops AI reviews and coach reports, but you can still read, download or delete what is already there."
+  },
+  {
+   "t": "p",
+   "text": "Your account details (name, email, sign-in records) are ordinary personal information and are needed to run your account whether or not you give health consent."
+  },
+  {
+   "t": "h2",
+   "id": "how-we-use",
+   "text": "How we use your information"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "To run your account and keep it secure.",
+    "To build and adjust your training plan, calculate your weekly statistics, and show you what changed and why.",
+    "To show your records to an assigned coach, if you have one and sharing is on.",
+    "To send you emails you need: confirming your address, resetting your password, and security notices (for example when your email or password changes). We do not send marketing.",
+    "To investigate and prevent misuse, and to meet legal obligations such as responding to a data breach."
+   ]
+  },
+  {
+   "t": "p",
+   "text": "We do not use your information for advertising, and we do not use it to make decisions about you that have legal or similarly significant effects. Plan suggestions are suggestions: you decide whether to accept them."
+  },
+  {
+   "t": "h2",
+   "id": "legal-bases",
+   "text": "Why we are allowed to use it"
+  },
+  {
+   "t": "p",
+   "text": "Not everything is based on consent. Depending on the law that applies to you:"
+  },
+  {
+   "t": "table",
+   "head": [
+    "What",
+    "Basis"
+   ],
+   "rows": [
+    [
+     "Running your account, your plan and your reviews",
+     "Needed to provide the service you asked for (for GDPR: contract)"
+    ],
+    [
+     "Health and wellness information",
+     "Your explicit consent, given at sign-up and withdrawable in Settings"
+    ],
+    [
+     "AI-written review wording",
+     "Your consent: it is off unless you turn it on"
+    ],
+    [
+     "Sharing with an assigned coach",
+     "Your choice: you can turn sharing off in Settings"
+    ],
+    [
+     "Security logging, rate limiting and preventing misuse",
+     "Our legitimate interest in keeping accounts and data safe"
+    ],
+    [
+     "Keeping records the law requires, responding to breaches",
+     "Legal obligation"
+    ]
+   ],
+   "caption": "Bases for using personal information"
+  },
+  {
+   "t": "h2",
+   "id": "ai",
+   "text": "AI-assisted weekly reviews"
+  },
+  {
+   "t": "p",
+   "text": "AI review wording is **off** until you turn it on in Settings, and it only works if the operator has set up an AI service. Every number in your review is calculated by the app; the AI only writes the words."
+  },
+  {
+   "t": "p",
+   "text": "When it is on, each weekly review sends this to Anthropic, the company that provides the AI model: the week's statistics, the app's own sentences about them, the written updates you made that week, counts of how hard exercises felt, and the plan changes the app proposed. Your name, email address and account ID are not sent. Your written updates can mention anything you wrote, including pain, so leave AI off if you prefer that not to leave Recomp."
+  },
+  {
+   "t": "p",
+   "text": "Under Anthropic's published commercial terms, data sent through its API is not used to train its models, and it is deleted from Anthropic's systems within 30 days unless Anthropic's safety systems flag it (flagged inputs may be kept for up to two years). Anthropic stores API data in the United States and may process requests in other countries. Whether a shorter retention arrangement applies to this service is set by the operator's Anthropic account: [to be confirmed by the operator]."
+  },
+  {
+   "t": "p",
+   "text": "Turning AI off stops all future requests straight away. Wording already written stays in your past reports, which are part of your own data; you can remove it in Settings."
+  },
+  {
+   "t": "h2",
+   "id": "who-can-see",
+   "text": "Who can see your information"
+  },
+  {
+   "t": "table",
+   "head": [
+    "Who",
+    "What they can see"
+   ],
+   "rows": [
+    [
+     "You",
+     "Everything in your account, in the app and in the download from Settings"
+    ],
+    [
+     "Administrators",
+     "Your name, email or login, role, status, sign-up details and last sign-in, so they can approve and manage accounts. They cannot read your training records, notes or reviews unless they are also assigned to you as a reviewer."
+    ],
+    [
+     "Your assigned coach (if you have one)",
+     "Your training records and the weekly reports you send them, but only while sharing is on in your Settings. Each time they read your records it is logged."
+    ],
+    [
+     "Service providers",
+     "Only what they need to run their part of the service, listed below"
+    ],
+    [
+     "Others",
+     "Nobody else, unless the law requires us to disclose information"
+    ]
+   ],
+   "caption": "Access to your information"
+  },
+  {
+   "t": "p",
+   "text": "Administrators can keep a private note about an account (for example why it was approved). It is included in what you can ask us for."
+  },
+  {
+   "t": "h2",
+   "id": "providers",
+   "text": "Service providers"
+  },
+  {
+   "t": "table",
+   "head": [
+    "Provider",
+    "What it does",
+    "What it receives",
+    "Where"
+   ],
+   "rows": [
+    [
+     "Cloudflare",
+     "Hosts the app and the database",
+     "All account and training data (stored encrypted at rest by Cloudflare)",
+     "Cloudflare's global network. Primary database location: [to be confirmed by the operator]"
+    ],
+    [
+     "Resend (if email is set up)",
+     "Sends account emails",
+     "Your email address, name and the email content (for example a one-time link)",
+     "United States"
+    ],
+    [
+     "Anthropic (only if you turn AI on)",
+     "Writes the wording of weekly reviews",
+     "The weekly review details listed above, without your name or email",
+     "United States, with processing possibly elsewhere"
+    ],
+    [
+     "Google Fonts",
+     "Supplies the typefaces the app uses",
+     "Your IP address and browser details when the app loads fonts. No cookies are set",
+     "Google's network"
+    ],
+    [
+     "Have I Been Pwned",
+     "Checks whether a new password has appeared in a known data breach",
+     "Only the first five characters of a scrambled (SHA-1) copy of the password. Nothing that identifies you",
+     "Not stated by the provider"
+    ]
+   ],
+   "caption": "Service providers"
+  },
+  {
+   "t": "h2",
+   "id": "international",
+   "text": "Sending information overseas"
+  },
+  {
+   "t": "p",
+   "text": "Some of these providers store or process information outside Australia, mainly in the United States. Before using them we take steps to make sure they protect it, including relying on their published data processing terms. For people in the EU or UK, Cloudflare, Resend and Anthropic publish data processing terms that include the European Commission's standard contractual clauses. Whether we have formally accepted each provider's terms is [to be confirmed by the operator]."
+  },
+  {
+   "t": "h2",
+   "id": "cookies",
+   "text": "Cookies, storage on your device and offline use"
+  },
+  {
+   "t": "table",
+   "head": [
+    "Item",
+    "Purpose",
+    "How long"
+   ],
+   "rows": [
+    [
+     "Cookie recomp_session",
+     "Keeps you signed in. Not readable by page scripts",
+     "Until you sign out, or after 7 days unused, or 30 days at most"
+    ],
+    [
+     "Cookie recomp_mfa",
+     "Holds a sign-in open while you enter your two-step code",
+     "5 minutes"
+    ],
+    [
+     "Browser storage (local storage and IndexedDB)",
+     "A working copy of your data so the app is fast and works offline",
+     "Until you sign out on that device"
+    ],
+    [
+     "App cache (service worker)",
+     "Stores the app's own files, not your records",
+     "Until the next app update"
+    ]
+   ],
+   "caption": "Storage on your device"
+  },
+  {
+   "t": "p",
+   "text": "Recomp keeps working offline for up to three days after it last reached the server. A device that is offline cannot be signed out remotely until it reconnects. Signing out clears your account's data from that device. If you use a shared device, sign out when you finish."
+  },
+  {
+   "t": "h2",
+   "id": "retention",
+   "text": "How long we keep information"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "Your account and training records: for as long as your account exists. There is no automatic deletion while your account is open. [Retention period for inactive accounts to be decided by the operator.]",
+    "When you delete your account, your records are deleted from the live database straight away.",
+    "Backups: the database host keeps automatic point-in-time backups for up to 30 days (7 days on its free plan). Deleted information stays in those backups until they expire and is only used to recover from a fault.",
+    "Security records: expired or ended sign-in sessions and one-time email links are removed during routine clean-up, no sooner than 7 days after they end. Records used to limit repeated attempts are removed within about two days.",
+    "The security log is kept so misuse can be investigated. When an account is deleted, its entries keep the event and date but lose the email address and IP address. [Retention period for the security log to be decided by the operator.]",
+    "Information on your own devices, and files you downloaded, are under your control."
+   ]
+  },
+  {
+   "t": "h2",
+   "id": "rights",
+   "text": "Your rights and how to use them"
+  },
+  {
+   "t": "table",
+   "head": [
+    "Right",
+    "How"
+   ],
+   "rows": [
+    [
+     "See what we hold",
+     "Settings, Your data, Download my data. It includes everything listed in this policy except password and code hashes and session tokens. Ask us for administrator notes about you."
+    ],
+    [
+     "Correct it",
+     "Change most things yourself in the app. For anything else, Settings, Your data, Send a request."
+    ],
+    [
+     "Delete it",
+     "Settings, Your data, Delete my account. Deletion is immediate (backups as described above)."
+    ],
+    [
+     "Take it elsewhere",
+     "The download is a standard JSON file."
+    ],
+    [
+     "Withdraw consent or object",
+     "Settings: turn off AI reviews, turn off coach sharing, or withdraw consent to use your health information."
+    ],
+    [
+     "Complain",
+     "See below."
+    ]
+   ],
+   "caption": "Your rights"
+  },
+  {
+   "t": "p",
+   "text": "If you live in the EU or the UK and their data protection laws apply to us, you also have rights to restrict processing and to object, and to complain to your local data protection authority. People in some US states and other countries have similar rights. Email {{operator.privacyEmail}} and we will help, whatever the law where you live."
+  },
+  {
+   "t": "p",
+   "text": "We may need to confirm it is you before acting on a request. Recomp asks you to enter your password (and two-step code, if you use one) again before downloading data or deleting your account, unless you signed in within the last 10 minutes."
+  },
+  {
+   "t": "h2",
+   "id": "choices",
+   "text": "Optional features"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "AI-written review wording: off by default.",
+    "Sharing with an assigned coach: on by default when a coach is assigned, and you can turn it off.",
+    "Garmin imports: only if you choose to import files. You can delete each import in Settings.",
+    "Two-step verification and passkeys: offered to everyone and required for administrators."
+   ]
+  },
+  {
+   "t": "h2",
+   "id": "security",
+   "text": "How we protect information"
+  },
+  {
+   "t": "p",
+   "text": "We use security measures appropriate to health information. They include: encrypted connections (HTTPS) everywhere; passwords stored only as salted, stretched hashes; screening of new passwords against known breaches; limits on repeated sign-in attempts; two-step verification and passkeys; required two-step verification for administrators; asking for your password again before sensitive actions; sign-in sessions you can review and end; encryption of the database at rest by our host; additional encryption by the app of training records, reports, messages and notes once the operator sets an encryption key [to be confirmed as enabled]; and a security log that the app cannot alter."
+  },
+  {
+   "t": "p",
+   "text": "This is not end-to-end encryption: Recomp's server can read your records in order to provide the service. No system is completely secure, and we cannot guarantee that information will never be accessed without permission. If a data breach is likely to cause serious harm, we will tell you and the Office of the Australian Information Commissioner as the Notifiable Data Breaches scheme requires."
+  },
+  {
+   "t": "h2",
+   "id": "children",
+   "text": "Children"
+  },
+  {
+   "t": "p",
+   "text": "Recomp is intended for adults. You must be 18 or older to create an account [minimum age to be confirmed by the operator]. We do not check ages; administrators review every request. If you think a child has an account, contact us and we will delete it."
+  },
+  {
+   "t": "h2",
+   "id": "complaints",
+   "text": "Complaints"
+  },
+  {
+   "t": "p",
+   "text": "Please contact us first at {{operator.privacyEmail}}. We will respond within 30 days. If you are not satisfied, you can complain to the [Office of the Australian Information Commissioner](https://www.oaic.gov.au/privacy/privacy-complaints). In the UK you can contact the [Information Commissioner's Office](https://ico.org.uk/make-a-complaint/). In the EU you can contact the data protection authority where you live."
+  },
+  {
+   "t": "h2",
+   "id": "changes",
+   "text": "Changes to this policy"
+  },
+  {
+   "t": "p",
+   "text": "This policy takes effect on {{policy.effectiveDate}}. If we change it in a way that matters, for example a new kind of data or a new provider, we will tell you in the app before the change applies and ask you to read the new version. The version history is below."
+  }
+ ],
+ "history": [
+  {
+   "version": "2026-10-11.1",
+   "date": "2026-10-11",
+   "summary": "First draft, written from the app's actual data handling. Awaiting operator details and legal review."
+  }
+ ]
+}

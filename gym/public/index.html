@@ -341,7 +341,7 @@ section[hidden]{display:none}
 /* ===================== auth: welcome, dialog, status page ==================
    Uses only the tokens above, so light and dark follow the rest of the app. */
 body.locked{overflow:hidden;padding:0}
-body.locked>*:not(#authGate){display:none!important}
+body.locked>*:not(#authGate):not(#docPage){display:none!important}
 .authgate{position:fixed;inset:0;z-index:200;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch}
 .authgate[hidden],.authgate [hidden]{display:none!important}
 .aw{position:relative;isolation:isolate;min-height:100%;display:flex;flex-direction:column}
@@ -451,6 +451,7 @@ body.locked>*:not(#authGate){display:none!important}
 .btn[aria-disabled="true"]{opacity:.6;cursor:progress}
 </style>
 <link rel="stylesheet" href="views.css">
+<link rel="stylesheet" href="content.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -474,6 +475,11 @@ body.locked>*:not(#authGate){display:none!important}
         <button class="btn lg" type="button" id="awSignup">Sign up</button>
       </div>
       <p class="aw-note">New accounts are checked by an administrator before they can be used.</p>
+      <nav class="aw-links" aria-label="About Recomp">
+        <a href="#about" data-doc="about">About Recomp</a>
+        <a href="#why" data-doc="why">Why Recomp</a>
+        <a href="#privacy" data-doc="privacy">Privacy policy</a>
+      </nav>
     </div>
   </div>
 
@@ -566,9 +572,39 @@ body.locked>*:not(#authGate){display:none!important}
             <ul class="pwreq" id="signupPw-req" data-pw="signupPw" aria-label="Password rules"></ul>
             <p class="af-err" id="signupPw-err" hidden></p>
           </div>
+          <div class="af aconsent">
+            <label class="acheck"><input id="signupPrivacy" type="checkbox" aria-describedby="signupPrivacy-err">
+              <span>I have read the <a href="#privacy" data-doc="privacy">privacy policy</a>.</span></label>
+            <p class="af-err" id="signupPrivacy-err" hidden></p>
+            <label class="acheck"><input id="signupHealth" type="checkbox" aria-describedby="signupHealth-hint signupHealth-err">
+              <span>I agree to Recomp storing and using the health and fitness information I enter or import (training, body measurements, food, sleep and heart rate) to run my plan.</span></label>
+            <p class="adlg-note" id="signupHealth-hint">This is needed for the app to work. You can withdraw it later in Settings. AI feedback is a separate choice, off until you turn it on.</p>
+            <p class="af-err" id="signupHealth-err" hidden></p>
+          </div>
           <p class="autherr" id="signupError" role="alert" hidden></p>
           <button class="btn primary block lg" id="signupBtn" type="submit">Create account</button>
           <p class="adlg-note">We email you a link to confirm your address. An administrator then reviews your request.</p>
+        </form>
+
+        <!-- two-step verification at log in -->
+        <form id="mfaForm" data-view="mfa" hidden novalidate autocomplete="on">
+          <div class="af" id="mfaCodeWrap">
+            <label for="mfaCode" id="mfaCodeLabel">6-digit code from your authenticator app</label>
+            <input id="mfaCode" name="one-time-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="mfaCode-err">
+            <p class="af-err" id="mfaCode-err" hidden></p>
+          </div>
+          <p class="autherr" id="mfaError" role="alert" hidden></p>
+          <button class="btn primary block lg" id="mfaBtn" type="submit">Verify</button>
+          <p class="alinks"><button class="alink" type="button" id="mfaUseRecovery">Use a recovery code instead</button></p>
+          <p class="alinks"><button class="alink" type="button" id="mfaPasskey" hidden>Use a passkey</button></p>
+          <p class="alinks"><button class="alink" type="button" data-goto="login">Back to log in</button></p>
+        </form>
+
+        <!-- forced set-up of two-step verification for owner and administrator accounts -->
+        <form id="mfaSetupForm" data-view="mfa-setup" hidden novalidate autocomplete="off">
+          <div id="mfaSetupBody"></div>
+          <p class="autherr" id="mfaSetupError" role="alert" hidden></p>
         </form>
 
         <!-- forgot password -->
@@ -695,6 +731,7 @@ body.locked>*:not(#authGate){display:none!important}
         </form>
 
         <p class="dim authfoot" id="authFoot"></p>
+        <nav class="adlg-links" aria-label="About Recomp"><a href="#about" data-doc="about">About</a><a href="#why" data-doc="why">Why Recomp</a><a href="#privacy" data-doc="privacy">Privacy</a></nav>
       </div>
     </div>
   </div>
@@ -944,7 +981,7 @@ body.locked>*:not(#authGate){display:none!important}
     <button role="tab" id="t-nutrition" class="sec" aria-controls="p-nutrition" aria-selected="false" data-tab="nutrition"><span class="ic" aria-hidden="true">◐</span>Nutrition</button>
     <button role="tab" id="t-progress" class="sec" aria-controls="p-progress" aria-selected="false" data-tab="progress"><span class="ic" aria-hidden="true">◪</span>Progress</button>
     <button role="tab" id="t-library" class="sec" aria-controls="p-library" aria-selected="false" data-tab="library"><span class="ic" aria-hidden="true">☰</span>Exercises</button>
-    <button role="tab" id="t-profile" class="sec" aria-controls="p-profile" aria-selected="false" data-tab="profile"><span class="ic" aria-hidden="true">◍</span>Profile</button>
+    <button role="tab" id="t-profile" class="sec" aria-controls="p-profile" aria-selected="false" data-tab="profile"><span class="ic" aria-hidden="true">◍</span>Settings</button>
     <button role="tab" id="t-more" class="more" aria-controls="p-more" aria-selected="false" data-tab="more"><span class="ic" aria-hidden="true">⋯</span>More</button>
   </div>
 </nav>
@@ -959,6 +996,7 @@ body.locked>*:not(#authGate){display:none!important}
 <script src="review.js"></script>
 <script src="garmin.js"></script>
 <script src="library.js"></script>
+<script src="views-content.js"></script>
 <script src="authclient.js"></script>
 <script src="authui.js"></script>
 <script src="admin.js"></script>
@@ -968,5 +1006,7 @@ body.locked>*:not(#authGate){display:none!important}
 <script src="views-plan.js"></script>
 <script src="views-review.js"></script>
 <script src="views-move.js"></script>
+<script src="views-settings.js"></script>
+<script src="views-admin-site.js"></script>
 </body>
 </html>

@@ -1,0 +1,114 @@
+{
+ "key": "why",
+ "title": "Why Recomp",
+ "version": "2026-10-11.1",
+ "updated": "2026-10-11",
+ "status": "published",
+ "summary": "Recomp is a training plan that pays attention. It adjusts to what you actually do, explains every change, and keeps you in control of your data.",
+ "blocks": [
+  {
+   "t": "h2",
+   "id": "what-you-get",
+   "text": "What you get"
+  },
+  {
+   "t": "cards",
+   "items": [
+    {
+     "title": "A plan that responds",
+     "text": "Your plan adjusts to your logged sessions, effort feedback and weekly check-ins. Each change is saved as a new plan version, so nothing shifts without a record.",
+     "badge": "Available now"
+    },
+    {
+     "title": "A reason for every change",
+     "text": "When a weight goes up, a set is added or a session moves, Recomp tells you why in plain words, based on what you logged.",
+     "badge": "Available now"
+    },
+    {
+     "title": "Reps count as progress",
+     "text": "With double progression, doing more repetitions at the same weight is recognised as progress before the load increases.",
+     "badge": "Available now"
+    },
+    {
+     "title": "Training, food and recovery together",
+     "text": "Workouts, stretch and recovery routines, nutrition targets, a suggested meal plan and an intake log sit in one place, alongside sleep and activity from Garmin files you import.",
+     "badge": "Available now"
+    },
+    {
+     "title": "A weekly reflection",
+     "text": "A short weekly check-in and review covers what went well, what needs attention and what to change next. Your written updates are part of it.",
+     "badge": "Available now"
+    },
+    {
+     "title": "AI help with wording, if you want it",
+     "text": "You can turn on AI-assisted wording for your weekly review. The app calculates the numbers; the AI only phrases them. It is off by default and is not a qualified human trainer.",
+     "badge": "Available now"
+    },
+    {
+     "title": "You control your data",
+     "text": "Export your data, delete your account, choose whether an assigned coach can see your records, and protect your sign-in with two-step verification.",
+     "badge": "Available now"
+    },
+    {
+     "title": "Recipes library",
+     "text": "Recipes that fit your targets. Today Recomp offers targets, a suggested meal plan and an intake log.",
+     "badge": "Planned"
+    },
+    {
+     "title": "Automatic wearable sync",
+     "text": "Syncing without downloading files. Today you import Garmin files yourself.",
+     "badge": "Planned"
+    },
+    {
+     "title": "Reminders",
+     "text": "Push reminders for sessions and check-ins.",
+     "badge": "Planned"
+    }
+   ]
+  },
+  {
+   "t": "h2",
+   "id": "how-it-works",
+   "text": "How it works"
+  },
+  {
+   "t": "steps",
+   "items": [
+    {
+     "title": "Set your goals",
+     "text": "Choose your goal, the days and time you have, and your equipment."
+    },
+    {
+     "title": "Follow your plan",
+     "text": "Train with clear targets for each exercise, with written cues and simple diagrams."
+    },
+    {
+     "title": "Log and reflect",
+     "text": "Record your sets and effort, add written updates, and answer a short weekly check-in."
+    },
+    {
+     "title": "Review and adapt",
+     "text": "See what changed and why, accept the changes you agree with, and start the next week."
+    }
+   ]
+  },
+  {
+   "t": "h2",
+   "id": "good-to-know",
+   "text": "Good to know"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "Results depend on many things outside any app. Recomp does not promise a particular outcome.",
+    "Nutrition targets are estimates from simple formulas, not measurements.",
+    "Recomp does not give medical advice. If you have pain, an injury or a health condition, speak with a qualified health professional.",
+    "Planned features are ideas we intend to build. They are not available yet and may change."
+   ]
+  },
+  {
+   "t": "p",
+   "text": "Learn more [about Recomp](#about) or read the [privacy policy](#privacy)."
+  }
+ ]
+}

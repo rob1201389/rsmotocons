@@ -30,12 +30,14 @@ const Views = (function () {
       btn.onclick = () => Admin.open(btn); rail.insertBefore(btn, rail.querySelector('.more'));
     } else if (!isAdmin() && btn) btn.remove();
     if (reg.more && H().tab === 'more') render('more', document.getElementById('p-more'));
+    if (window.Settings && H().AUTH_MODE === 'server') { Settings.loadServerSettings(); setTimeout(() => Settings.checkConsentOnce(), 600); }
   }
   function openAccount(u, signOut) {
     sheet('Account', (b, close) => {
       b.appendChild(el('p', null, `<b>${esc(u.name || u.email)}</b><br><span class="muted">${esc(u.email)} · ${esc(u.role)}</span>`));
-      if (isAdmin()) { const a = el('button', 'btn primary block', 'Administration: requests and users'); a.style.marginTop = '8px'; a.onclick = () => { closeSheet(); Admin.open(); }; b.appendChild(a); }
-      const st = el('button', 'btn block', 'Settings and profile'); st.style.marginTop = '8px'; st.onclick = () => { closeSheet(); H().go('profile'); }; b.appendChild(st);
+      if (isAdmin()) { const a = el('button', 'btn primary block', 'Administration: requests and users'); a.style.marginTop = '8px'; a.onclick = () => { closeSheet(); Admin.open(); }; b.appendChild(a);
+        const s2 = el('button', 'btn block', 'Site, privacy and security'); s2.style.marginTop = '8px'; s2.onclick = () => { closeSheet(); if (window.AdminSite) AdminSite.open(); }; b.appendChild(s2); }
+      const st = el('button', 'btn block', 'Settings'); st.style.marginTop = '8px'; st.onclick = () => { closeSheet(); H().go('profile'); }; b.appendChild(st);
       const gl = el('button', 'btn block', 'Goals and plan settings'); gl.style.marginTop = '8px'; gl.onclick = () => { closeSheet(); if (window.PlanUI) PlanUI.openGoals(!Plan.hasPlan(H().S)); }; b.appendChild(gl);
       const so = el('button', 'btn ghost block', 'Sign out'); so.style.marginTop = '8px'; so.onclick = () => { closeSheet(); signOut(); }; b.appendChild(so);
     });
@@ -182,6 +184,9 @@ const Views = (function () {
       const ad = el('button', 'vlink'); ad.type = 'button'; ad.id = 'moreAdmin';
       ad.innerHTML = '<b>Administration</b><span class="muted">Sign-up requests, users, roles and permissions</span><span class="chev" aria-hidden="true">›</span>';
       ad.onclick = () => Admin.open(ad); list.appendChild(ad);
+      const st = el('button', 'vlink'); st.type = 'button'; st.id = 'moreSite';
+      st.innerHTML = '<b>Site, privacy and security</b><span class="muted">Setup checklist, operator details, page content, member requests, security events</span><span class="chev" aria-hidden="true">›</span>';
+      st.onclick = () => { if (window.AdminSite) AdminSite.open(); }; list.appendChild(st);
     }
     const gs = el('button', 'vlink'); gs.type = 'button';
     gs.innerHTML = '<b>Goals and plan settings</b><span class="muted">Goal, days, session length, equipment, review day</span><span class="chev" aria-hidden="true">›</span>';

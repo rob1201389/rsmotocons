@@ -139,21 +139,29 @@ const Garmin = (function () {
   function applyImport(state, parsed, nowMs) {
     if (!parsed || !parsed.rows || !parsed.rows.length) return { ok: false, added: 0, duplicates: 0 };
     const w = ensure(state); let added = 0, duplicates = 0;
+    const importId = 'im_' + nowMs;
+    /* Every stored row remembers which import brought it, so one import can be deleted on its own. */
     if (parsed.kind === 'sleep') parsed.rows.forEach(r => {
       const i = w.sleep.findIndex(x => x.date === r.date);
-      if (i >= 0) { duplicates++; if (w.sleep[i].hours !== r.hours) { w.sleep[i] = r; } } else { w.sleep.push(r); added++; }
+      if (i >= 0) { duplicates++; if (w.sleep[i].hours !== r.hours) { w.sleep[i] = Object.assign({}, r, { importId }); } } else { w.sleep.push(Object.assign({}, r, { importId })); added++; }
     });
     else parsed.rows.forEach(r => {
       if (w.activities.some(x => x.date === r.date && x.type === r.type && x.minutes === r.minutes)) { duplicates++; return; }
-      w.activities.push(Object.assign({ id: 'ac_' + r.date + '_' + added + '_' + w.activities.length, excluded: r.kind === 'strength', linkedSessionId: null }, r)); added++;
+      w.activities.push(Object.assign({ id: 'ac_' + r.date + '_' + added + '_' + w.activities.length, excluded: r.kind === 'strength', linkedSessionId: null, importId }, r)); added++;
     });
     w.sleep.sort((a, b) => a.date < b.date ? -1 : 1); w.activities.sort((a, b) => a.date < b.date ? -1 : 1);
-    w.imports.push({ id: 'im_' + nowMs, kind: parsed.kind, format: parsed.format, filename: parsed.filename, rows: parsed.rows.length, added, duplicates, coverage: parsed.coverage, importedAt: nowMs });
+    w.imports.push({ id: importId, kind: parsed.kind, format: parsed.format, filename: parsed.filename, rows: parsed.rows.length, added, duplicates, coverage: parsed.coverage, importedAt: nowMs });
     return { ok: true, added, duplicates, coverage: parsed.coverage };
   }
+  /* Deletes one import and every row it brought in. Rows imported before rows were
+     tagged (no importId) can only be removed with clearAll. Returns rows removed. */
   function removeImport(state, importId) {
-    const w = ensure(state); const im = w.imports.find(i => i.id === importId); if (!im) return false;
-    w.imports = w.imports.filter(i => i.id !== importId); return true;      // rows stay; the user can clear data separately
+    const w = ensure(state); const im = w.imports.find(i => i.id === importId); if (!im) return null;
+    const before = w.sleep.length + w.activities.length;
+    w.sleep = w.sleep.filter(r => r.importId !== importId);
+    w.activities = w.activities.filter(r => r.importId !== importId);
+    w.imports = w.imports.filter(i => i.id !== importId);
+    return { removed: before - (w.sleep.length + w.activities.length), untagged: w.sleep.concat(w.activities).filter(r => !r.importId).length };
   }
   function clearAll(state) { state.wellness = { sleep: [], activities: [], imports: [] }; }
 

@@ -40,7 +40,9 @@ const AuthUI = (function () {
     'check-email': { title: 'Check your email', sub: '' },
     verified:      { title: 'Email confirmed', sub: '' },
     setup:         { title: 'Set up your account', sub: 'First time only. Enter your login and choose your own password.', focus: 'setupEmail' },
-    password:      { title: 'New password', sub: 'Choose a new password before you continue. The one you were given is temporary.', focus: 'pwCurrent' }
+    password:      { title: 'New password', sub: 'Choose a new password before you continue. The one you were given is temporary.', focus: 'pwCurrent' },
+    mfa:           { title: 'Two-step verification', sub: 'Enter the code from your authenticator app to finish logging in.', focus: 'mfaCode' },
+    'mfa-setup':   { title: 'Turn on two-step verification', sub: 'Accounts that can manage other people need a second step at log in.' }
   };
   const NO_ACCESS = {
     rejected: 'Your request for an account was not approved. If you think this is a mistake, contact the administrator.',
@@ -48,13 +50,12 @@ const AuthUI = (function () {
   };
 
   /* ------------------------------------------- password rules ----------
-     These mirror passwordProblems() in the backend (crypto.js). The server
+     Length, not composition (OWASP ASVS 5.0). The server (crypto.js) checks again,
+     including a breached-password check this page cannot do. The server
      checks again; this only tells people what is needed before they submit. */
   const PW_RULES = [
-    { text: 'At least 12 characters',             need: 'at least 12 characters',                  ok: p => p.length >= 12 },
-    { text: 'A lowercase letter',                 need: 'a lowercase letter',                      ok: p => /[a-z]/.test(p) },
-    { text: 'An uppercase letter or a symbol',    need: 'an uppercase letter or a symbol',         ok: p => /[A-Z]/.test(p) || /[^A-Za-z0-9]/.test(p) },
-    { text: 'A digit',                            need: 'a digit',                                 ok: p => /[0-9]/.test(p) }
+    { text: 'At least 12 characters (a few words together works well)', need: 'at least 12 characters', ok: p => p.length >= 12 },
+    { text: 'Not a common password, or the app\'s name', need: 'to be less easy to guess', ok: p => !/^(password|qwerty|recomp|rsmotocons|letmein|welcome|admin)[0-9!]*$/i.test(p.replace(/[^A-Za-z0-9!]/g, '')) }
   ];
   function passwordProblems(pw) {
     pw = pw || '';
@@ -79,8 +80,11 @@ const AuthUI = (function () {
     signupForm: [
       ['signupName', v => { const n = v.trim().replace(/\s+/g, ' '); return n.length >= 2 && n.length <= 80 ? null : 'Enter your name (2 to 80 characters).'; }],
       ['signupEmail', emailMessage],
-      ['signupPw', v => v ? pwMessage(v) : 'Choose a password. ' + pwMessage('')]
+      ['signupPw', v => v ? pwMessage(v) : 'Choose a password. ' + pwMessage('')],
+      ['signupPrivacy', () => $('signupPrivacy').checked ? null : 'Tick to confirm you have read the privacy policy.'],
+      ['signupHealth', () => $('signupHealth').checked ? null : 'Recomp cannot run your plan without this. Tick it to continue, or close this window if you do not agree.']
     ],
+    mfaForm: [['mfaCode', v => { const c = v.replace(/[\s-]/g, ''); return st.mfaRecovery ? (c.length >= 8 ? null : 'Enter one of your recovery codes.') : (/^\d{6}$/.test(c) ? null : 'Enter the 6-digit code.'); }]],
     forgotForm: [['forgotEmail', emailMessage]],
     resetForm: [
       ['resetPw', v => v ? pwMessage(v) : 'Choose a new password. ' + pwMessage('')],
@@ -175,7 +179,7 @@ const AuthUI = (function () {
 
   /* ------------------------------------------------- app shell lock --- */
   function shellNodes() {
-    return [...document.body.children].filter(n => n.id !== 'authGate' && n.tagName !== 'SCRIPT');
+    return [...document.body.children].filter(n => n.id !== 'authGate' && n.id !== 'docPage' && n.tagName !== 'SCRIPT');
   }
   function lockShell() {
     document.body.classList.add('locked');
@@ -413,6 +417,7 @@ const AuthUI = (function () {
 
   async function safeSignedIn(user) {
     st.resume = null;
+    if (user && (user.mfaSetupRequired || (user.mfa && user.mfa.required && !user.mfa.totp && !user.mfa.passkeys))) { await mfaSetupFlow(user); return; }
     try { await hooks.signedIn(user); } catch (e) { /* the app reports its own errors */ }
   }
 
@@ -453,12 +458,115 @@ const AuthUI = (function () {
         return;
       }
       $('loginPassword').value = '';
+      if (r.mfaRequired) { startMfa(r.methods); return; }
       st.busy = false;
       await safeSignedIn(r.user);
       st.busy = true;
     });
   }
 
+  /* --------------------------------------------- two-step verification -- */
+  function startMfa(methods) {
+    st.mfaRecovery = false; st.mfaMethods = methods || ['totp', 'recovery'];
+    paintMfaMode();
+    $('mfaPasskey').hidden = !(st.mfaMethods.indexOf('passkey') >= 0 && AUTH.passkeysAvailable && AUTH.passkeysAvailable());
+    setView('mfa');
+  }
+  function paintMfaMode() {
+    $('mfaCodeLabel').textContent = st.mfaRecovery ? 'One of your recovery codes' : '6-digit code from your authenticator app';
+    $('mfaCode').setAttribute('inputmode', st.mfaRecovery ? 'text' : 'numeric');
+    $('mfaCode').setAttribute('autocomplete', st.mfaRecovery ? 'off' : 'one-time-code');
+    $('mfaUseRecovery').textContent = st.mfaRecovery ? 'Use my authenticator app instead' : 'Use a recovery code instead';
+    $('mfaUseRecovery').hidden = st.mfaMethods && st.mfaMethods.indexOf('recovery') < 0;
+  }
+  async function onMfa(e) {
+    e.preventDefault();
+    if (st.busy || !validate($('mfaForm'))) return;
+    formError('mfaError', '');
+    await withBusy($('mfaBtn'), 'Checking…', async () => {
+      const code = $('mfaCode').value.replace(/\s/g, '');
+      let r;
+      try { r = await AUTH.mfaVerify(st.mfaRecovery ? { recoveryCode: code } : { code }); }
+      catch (e2) { formError('mfaError', OFFLINE_MSG); return; }
+      $('mfaCode').value = '';
+      if (!r.ok) {
+        if (r.expired) { setView('login', { notice: 'That log in timed out. Enter your password again.' }); return; }
+        formError('mfaError', r.error); $('mfaCode').focus(); return;
+      }
+      st.busy = false; await safeSignedIn(r.user); st.busy = true;
+    });
+  }
+  async function onMfaPasskey() {
+    if (st.busy) return;
+    await withBusy($('mfaPasskey'), 'Waiting for your passkey…', async () => {
+      let r; try { r = await AUTH.passkeyLogin(); } catch (e2) { formError('mfaError', OFFLINE_MSG); return; }
+      if (!r.ok) { if (!r.cancelled) formError('mfaError', r.error); return; }
+      st.busy = false; await safeSignedIn(r.user); st.busy = true;
+    });
+  }
+
+  /* Owner and administrator accounts must enrol before anything else loads. */
+  async function mfaSetupFlow(user) {
+    openDialog('mfa-setup', { opener: $('awLogin') });
+    const body = $('mfaSetupBody'); body.innerHTML = '';
+    const p = (t, cls) => { const n = document.createElement('p'); if (cls) n.className = cls; n.textContent = t; return n; };
+    body.appendChild(p('You will need an authenticator app such as Google Authenticator, Microsoft Authenticator, 1Password or Apple Passwords. Each time you log in you type the 6-digit code it shows.', 'adlg-note'));
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn primary block lg'; go.textContent = 'Set up my authenticator app';
+    body.appendChild(go);
+    const out = $('mfaSetupBtnLogout') || document.createElement('button'); out.type = 'button'; out.className = 'btn ghost block'; out.id = 'mfaSetupBtnLogout'; out.textContent = 'Log out'; out.style.marginTop = '8px';
+    out.onclick = async () => { await AUTH.logout(); location.reload(); };
+    body.appendChild(out);
+    go.onclick = async () => {
+      formError('mfaSetupError', '');
+      let r; try { r = await AUTH.call('POST', '/api/auth/mfa/totp/begin', {}, 'Could not start set-up.'); } catch (e) { formError('mfaSetupError', OFFLINE_MSG); return; }
+      if (!r.ok) { formError('mfaSetupError', r.code === 'reauth_required' ? 'For safety, log out and log in again, then set this up straight away.' : r.error); return; }
+      body.innerHTML = '';
+      body.appendChild(p('1. In your authenticator app, add an account using this key:', 'adlg-note'));
+      const key = document.createElement('code'); key.className = 'mfa-key'; key.textContent = String(r.data.secret).replace(/(.{4})/g, '$1 ').trim(); body.appendChild(key);
+      const row = document.createElement('p'); row.className = 'alinks';
+      const open = document.createElement('a'); open.href = r.data.otpauthUri; open.textContent = 'Open in my authenticator app'; open.className = 'alink'; row.appendChild(open);
+      const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'alink'; copy.textContent = 'Copy key'; copy.style.marginLeft = '14px';
+      copy.onclick = () => { try { navigator.clipboard.writeText(r.data.secret); announce('Key copied'); } catch (x) {} }; row.appendChild(copy); body.appendChild(row);
+      body.appendChild(p('2. Type the 6-digit code it shows:', 'adlg-note'));
+      const wrapF = document.createElement('div'); wrapF.className = 'af';
+      const lab = document.createElement('label'); lab.htmlFor = 'mfaSetupCode'; lab.textContent = 'Code from the app';
+      const inp = document.createElement('input'); inp.id = 'mfaSetupCode'; inp.type = 'text'; inp.inputMode = 'numeric'; inp.autocomplete = 'one-time-code'; inp.maxLength = 8;
+      wrapF.append(lab, inp); body.appendChild(wrapF);
+      const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'btn primary block lg'; ok.textContent = 'Turn on two-step verification'; body.appendChild(ok);
+      body.appendChild(out);
+      inp.focus();
+      ok.onclick = async () => {
+        const code = inp.value.replace(/\s/g, '');
+        if (!/^\d{6}$/.test(code)) { formError('mfaSetupError', 'Enter the 6-digit code from the app.'); inp.focus(); return; }
+        const c = await AUTH.call('POST', '/api/auth/mfa/totp/confirm', { code }, 'That code did not match. Check the time on your phone and try again.');
+        if (!c.ok) { formError('mfaSetupError', c.error); inp.select(); return; }
+        formError('mfaSetupError', '');
+        showRecoveryCodes(body, c.data.recoveryCodes || [], async () => {
+          const me = await AUTH.refreshUser();
+          closeDialog({ focus: false });
+          await safeSignedIn(me.ok ? me.user : user);
+        });
+      };
+    };
+  }
+  function showRecoveryCodes(body, codes, done) {
+    body.innerHTML = '';
+    const h = document.createElement('p'); h.className = 'adlg-note'; h.textContent = 'Two-step verification is on. Save these recovery codes somewhere safe, such as a password manager. Each works once if you lose your phone. They will not be shown again.'; body.appendChild(h);
+    const ol = document.createElement('ol'); ol.className = 'mfa-codes'; codes.forEach(c => { const li = document.createElement('li'); li.textContent = c; ol.appendChild(li); }); body.appendChild(ol);
+    const dl = document.createElement('button'); dl.type = 'button'; dl.className = 'btn block'; dl.textContent = 'Download as a text file';
+    dl.onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['Recomp recovery codes\n\n' + codes.join('\n') + '\n'], { type: 'text/plain' })); a.download = 'recomp-recovery-codes.txt'; document.body.appendChild(a); a.click(); a.remove(); };
+    body.appendChild(dl);
+    const lab = document.createElement('label'); lab.className = 'acheck'; const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'mfaSaved';
+    const sp = document.createElement('span'); sp.textContent = 'I have saved my recovery codes'; lab.append(cb, sp); body.appendChild(lab);
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn primary block lg'; go.textContent = 'Continue'; go.disabled = true; body.appendChild(go);
+    cb.onchange = () => { go.disabled = !cb.checked; };
+    go.onclick = done;
+    go.focus && dl.focus();
+  }
+
+  async function privacyVersion() {
+    try { const d = window.Content ? await Content.load('privacy') : null; return (d && d.version) || 'unversioned'; } catch (e) { return 'unversioned'; }
+  }
   async function onSignup(e) {
     e.preventDefault();
     if (st.busy || !validate($('signupForm'))) return;
@@ -467,7 +575,9 @@ const AuthUI = (function () {
       name: $('signupName').value.trim().replace(/\s+/g, ' '),
       email: $('signupEmail').value.trim().toLowerCase(),
       password: $('signupPw').value,
-      website: $('signupWebsite').value
+      website: $('signupWebsite').value,
+      healthConsent: $('signupHealth').checked,
+      privacyNoticeVersion: await privacyVersion()
     };
     await withBusy($('signupBtn'), 'Creating account…', async () => {
       let r;
@@ -636,6 +746,11 @@ const AuthUI = (function () {
 
     bindForm('loginForm', onLogin); bindForm('signupForm', onSignup); bindForm('forgotForm', onForgot);
     bindForm('resetForm', onReset); bindForm('setupForm', onSetup); bindForm('pwForm', onPassword);
+    bindForm('mfaForm', onMfa);
+    $('mfaUseRecovery').addEventListener('click', () => { st.mfaRecovery = !st.mfaRecovery; paintMfaMode(); clearFieldError($('mfaCode')); $('mfaCode').value = ''; $('mfaCode').focus(); });
+    $('mfaPasskey').addEventListener('click', onMfaPasskey);
+    /* About, Why and Privacy open over the dialog; the dialog closes first so focus is not trapped behind the page. */
+    document.addEventListener('click', e => { const a = e.target.closest('#authDialog [data-doc]'); if (a && isOpen()) { st.busy = false; closeDialog({ focus: false }); } }, true);
 
     $('awLogin').addEventListener('click', e => openDialog(st.resume || 'login', { opener: e.currentTarget }));
     $('awSignup').addEventListener('click', e => openDialog('signup', { opener: e.currentTarget }));
@@ -774,7 +889,7 @@ const AuthUI = (function () {
   function configure(o) { Object.assign(cfg, o || {}); }
 
   return { init, show, hide, consumeUrl, checkStatus, configure, passwordProblems,
-           isOpen, view: () => st.view, mode: () => st.mode, closeDialog };
+           isOpen, view: () => st.view, mode: () => st.mode, closeDialog, showRecoveryCodes, mfaSetupFlow };
 })();
 
 if (typeof window !== 'undefined') window.AuthUI = AuthUI;

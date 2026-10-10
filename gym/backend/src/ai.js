@@ -6,6 +6,7 @@ import { json, err } from './http.js';
 import { audit } from './auth.js';
 import { can } from './rbac.js';
 import { hit, countSince, HOUR, DAY } from './limits.js';
+import { getSettings, healthConsentWithdrawn } from './account.js';
 
 export const DEFAULT_MODEL = 'claude-sonnet-5-5';
 const MAX_PAYLOAD_BYTES = 40 * 1024;
@@ -225,9 +226,13 @@ export async function callAnthropic(env, userContent, fetchImpl, timeoutMs) {
 }
 
 /* ------------------------------------------------------------------ route */
+export const aiConfigured = env => !!(env && env.ANTHROPIC_API_KEY);
 export async function weeklyReview(rc, user) {
   const { db, env, now, ip } = rc;
   if (!can(user, 'reviews')) return err(403, 'You do not have access to reviews.');
+  // The member's own choice, enforced here: nothing is sent to the provider unless it is on.
+  if (!(await getSettings(db, user.id)).aiReviews) return err(403, 'AI reviews are turned off in your settings.', { code: 'ai_disabled' });
+  if (await healthConsentWithdrawn(db, user.id)) return err(403, 'You have withdrawn consent to use your health information.', { code: 'health_consent_withdrawn' });
   let parsed;
   try {
     const text = await rc.req.text();

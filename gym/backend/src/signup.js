@@ -2,7 +2,9 @@
    administrator's request queue. Every function takes the request context `rc`
    built in api.js: { req, ctx, db, env, now, url, ip, ua, secure }. */
 import { json, err, readBody } from './http.js';
-import { hashPassword, verifyPassword, randomToken, sha256hex, newId, passwordProblems } from './crypto.js';
+import { hashPassword, verifyPassword, randomToken, sha256hex, newId, passwordProblems, screenPassword, sealText, openText } from './crypto.js';
+import { recordConsent } from './account.js';
+import { markReauth } from './security.js';
 import { audit, createSession, sessionCookie, revokeAllSessions } from './auth.js';
 import { isOwner, FEATURES } from './rbac.js';
 import { sendMail, mailConfigured, verifyEmail, resetEmail } from './mail.js';
@@ -71,8 +73,11 @@ export async function signup(rc) {
   const password = typeof b.password === 'string' ? b.password : '';
   if (name.length < 2 || name.length > 80) return err(400, 'Please enter your name (2 to 80 characters).');
   if (!email || email.length > 120 || !EMAIL_RE.test(email)) return err(400, 'Please enter a valid email address.');
-  if (password.length > 200) return err(400, 'That password is too long.');
-  const problems = passwordProblems(password);
+  if (password.length > 256) return err(400, 'That password is too long.');
+  const pnv = typeof b.privacyNoticeVersion === 'string' ? b.privacyNoticeVersion.trim() : '';
+  if (!pnv || pnv.length > 40) return err(400, 'Please confirm you have read the privacy policy.', { code: 'privacy_notice_required' });
+  if (b.healthConsent !== true) return err(400, 'Recomp needs your agreement to use your health and fitness information.', { code: 'health_consent_required' });
+  const problems = await screenPassword(password, env, { words: [name, email.split('@')[0]] }, rc.ctx.hibpFetch);
   if (problems.length) return err(400, `Your password needs ${problems.join(', ')}.`);
 
   if (!(await allow(rc, 'signup|ip|' + (ip || 'noip'), 5, HOUR)) ||
@@ -118,9 +123,12 @@ export async function signup(rc) {
     return generic(mailConfigured(env));            // lost a race with an identical sign-up
   }
   const user = await db.get('SELECT * FROM users WHERE id = ?', id);
+  await recordConsent(db, id, 'privacy_notice', pnv, true, now, 'signup');
+  await recordConsent(db, id, 'health_data', null, true, now, 'signup');
   await audit(db, user, 'signup.created', id, { requestId: reqId }, ip);
   const sent = await mailVerification(rc, user);
   const token = await createSession(db, user, ip, rc.ua, now);
+  await markReauth(db, await sha256hex(token), now);
   return json({ ok: true, status: 'pending_verification', emailSent: sent }, 200,
     { 'Set-Cookie': sessionCookie(token, rc.secure) });
 }
@@ -186,8 +194,8 @@ export async function reset(rc) {
   if (!(await allow(rc, 'reset|ip|' + (ip || 'noip'), 20, HOUR))) return err(429, 'Too many attempts. Please try again later.');
   const b = await readBody(rc.req);
   const pw = typeof b.password === 'string' ? b.password : '';
-  if (pw.length > 200) return err(400, 'That password is too long.');
-  const problems = passwordProblems(pw);
+  if (pw.length > 256) return err(400, 'That password is too long.');
+  const problems = await screenPassword(pw, rc.env, null, rc.ctx.hibpFetch);
   if (problems.length) return err(400, `Your password needs ${problems.join(', ')}.`);
   const row = await consumeToken(db, b.token, 'reset', now);
   if (!row) return err(400, 'This reset link is invalid or has expired. Please ask for a new one.');
@@ -322,7 +330,8 @@ export async function adminNote(rc, actor, userId) {
   if (!target) return err(404, 'No such account.');
   if (rc.req.method === 'GET') {
     const n = await db.get('SELECT note, updated_at, updated_by FROM admin_notes WHERE user_id = ?', userId);
-    return json({ note: n ? n.note : '', updatedAt: n ? n.updated_at : null, updatedBy: n ? n.updated_by : null });
+    if (n) await audit(db, actor, 'admin.note_read', userId, null, ip);
+    return json({ note: n ? await openText(rc.env, n.note) : '', updatedAt: n ? n.updated_at : null, updatedBy: n ? n.updated_by : null });
   }
   const b = await readBody(rc.req);
   const n = cleanNote(b.note, 2000);
@@ -332,7 +341,7 @@ export async function adminNote(rc, actor, userId) {
   } else {
     await db.run(`INSERT INTO admin_notes (user_id, note, updated_at, updated_by) VALUES (?,?,?,?)
                   ON CONFLICT(user_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
-      userId, n.value, now, actor.id);
+      userId, await sealText(rc.env, n.value), now, actor.id);
   }
   await audit(db, actor, 'admin.note_changed', userId, { cleared: n.value === null, length: n.value ? n.value.length : 0 }, ip);
   return json({ ok: true });

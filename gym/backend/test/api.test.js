@@ -3,6 +3,15 @@
    Run: node test/api.test.js */
 import { createApp } from '../server.js';
 import { bootstrapOwner } from '../src/auth.js';
+import { hotp, base32Decode } from '../src/crypto.js';
+const totp = (secret, off = 0) => hotp(base32Decode(secret), Math.floor(Date.now() / 30000) + off, 6);
+/* Owner and admin accounts must turn on two-step verification before anything else. */
+async function enrol(c) {
+  const b = await c.fetch('/api/auth/mfa/totp/begin', { method: 'POST', body: {} });
+  const conf = await c.fetch('/api/auth/mfa/totp/confirm', { method: 'POST', body: { code: await totp(b.data.secret) } });
+  if (conf.status !== 200) throw new Error('enrol failed ' + JSON.stringify(conf.data));
+  c.secret = b.data.secret; return c;
+}
 
 let pass = 0, fail = 0; const fails = [];
 const t = async (n, f) => { try { await f(); pass++; console.log('  \x1b[32mPASS\x1b[0m ' + n); }
@@ -13,7 +22,7 @@ const sec = s => console.log('\n\x1b[1m' + s + '\x1b[0m');
 
 const OWNER_PW = 'Owner-Passphrase-99';
 const env = { OWNER_EMAIL: 'owner@example.test', OWNER_NAME: 'Owner',
-              BOOTSTRAP_OWNER_PASSWORD: OWNER_PW };
+              BOOTSTRAP_OWNER_PASSWORD: OWNER_PW, HIBP_CHECK: 'off' };
 
 const { server, db } = await createApp({ env });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -21,10 +30,10 @@ const BASE = `http://127.0.0.1:${server.address().port}`;
 
 /* A client that keeps its own cookie jar, like a browser would. */
 function client() {
-  let cookie = null;
+  let cookie = null; const jar = {};
   return {
     get cookie() { return cookie; },
-    clear() { cookie = null; },
+    clear() { cookie = null; for (const k in jar) delete jar[k]; },
     async fetch(path, opts = {}) {
       const headers = Object.assign({ 'Content-Type': 'application/json', 'X-Recomp-Request': '1' },
         opts.headers || {});
@@ -33,11 +42,12 @@ function client() {
         method: opts.method || 'GET', headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined
       });
-      const sc = res.headers.get('set-cookie');
-      if (sc) {
-        const v = sc.split(';')[0];
-        cookie = v.endsWith('=') ? null : v;     // Max-Age=0 clears it
+      // Like a browser: each Set-Cookie updates its own cookie in the jar.
+      for (const sc of res.headers.getSetCookie()) {
+        const v = sc.split(';')[0], name = v.split('=')[0];
+        jar[name] = v.endsWith('=') ? null : v;     // Max-Age=0 clears it
       }
+      cookie = Object.values(jar).filter(Boolean).join('; ') || null;
       let data = null;
       try { data = await res.json(); } catch (e) {}
       return { status: res.status, data, headers: res.headers };
@@ -139,19 +149,19 @@ sec('PLAIN-NAME LOGIN — a login does not have to be an email');
     ck3 = null;
     eq((await call3('/api/auth/login', { email: 'RsMotoCons', password: PW })).status, 200);
     ck3 = null;
-    eq((await call3('/api/auth/login', { email: 'RsMotoCons', password: 'Wrong-Passphrase-1' })).status, 401);
+    eq((await call3('/api/auth/login', { email: 'RsMotoCons', password: 'Wrong-Passphrase-1' })).status, 401); // gitleaks:allow (synthetic test credential)
   });
   app3.server.close();
 }
 
 await t('a weak bootstrap password is refused with the requirement explained', async () => {
   // A stand-in with the same shape as a weak password: digits + lowercase only.
-  const WEAK = '123' + 'trythis' + '123';
+  const WEAK = 'pass' + 'word' + '1234';             // a common password: refused whatever its length
   const fresh = await createApp({ env: { OWNER_EMAIL: 'x@y.test', BOOTSTRAP_OWNER_PASSWORD: WEAK } });
   const r = await bootstrapOwner(fresh.db, { OWNER_EMAIL: 'x@y.test', BOOTSTRAP_OWNER_PASSWORD: WEAK }, Date.now());
   eq(r.ok, false);
   eq(r.reason, 'weak_bootstrap_password');
-  ok(/uppercase|symbol/.test(r.message), r.message);
+  ok(/less easy to guess/.test(r.message), r.message);
   ok(!r.message.includes(WEAK), 'the password must not be echoed back');
   fresh.db.close();
 });
@@ -205,10 +215,15 @@ await t('everything is blocked until the password is changed', async () => {
   eq(r.data.mustChangePassword, true);
 });
 
-await t('changing the password unblocks the account', async () => {
+await t('changing the password leads to two-step verification set-up, then unblocks the account', async () => {
   const r = await owner.fetch('/api/auth/password', { method: 'POST',
     body: { current: OWNER_PW, next: 'Owner-New-Passphrase-7' } });
   eq(r.status, 200);
+  const blocked = await owner.fetch('/api/admin/users');
+  eq(blocked.status, 403); eq(blocked.data.code, 'mfa_setup_required');
+  const me = await owner.fetch('/api/auth/me');
+  eq(me.data.user.mfaSetupRequired, true);
+  await enrol(owner);
   const u = await owner.fetch('/api/admin/users');
   eq(u.status, 200);
 });
@@ -226,7 +241,7 @@ sec('ADMIN CREATES THE LOGINS (no email, no self-registration)');
 await t('no unauthenticated route can create an account', async () => {
   for (const path of ['/api/auth/register', '/api/register', '/api/users', '/api/admin/users']) {
     const r = await client().fetch(path, { method: 'POST',
-      body: { email: 'intruder@example.test', password: 'Intruder-Passphrase-1', role: 'owner' } });
+      body: { email: 'intruder@example.test', password: 'Intruder-Passphrase-1', role: 'owner' } }); // gitleaks:allow (synthetic test credential)
     ok(r.status === 401 || r.status === 403 || r.status === 404,
       `${path} returned ${r.status}`);
   }
@@ -236,7 +251,7 @@ await t('no unauthenticated route can create an account', async () => {
 
 await t('the owner creates two members and a coach', async () => {
   const a = await owner.fetch('/api/admin/users', { method: 'POST',
-    body: { email: 'alice@example.test', name: 'Alice', password: 'Alice-Passphrase-1', role: 'member' } });
+    body: { email: 'alice@example.test', name: 'Alice', password: 'Alice-Passphrase-1', role: 'member' } }); // gitleaks:allow (synthetic test credential)
   const b = await owner.fetch('/api/admin/users', { method: 'POST',
     body: { email: 'bob@example.test', name: 'Bob', password: 'Bob-Passphrase-2', role: 'member' } });
   const c = await owner.fetch('/api/admin/users', { method: 'POST',
@@ -247,7 +262,7 @@ await t('the owner creates two members and a coach', async () => {
 
 await t('created accounts must change their password on first login', async () => {
   const r = await alice.fetch('/api/auth/login', { method: 'POST',
-    body: { email: 'alice@example.test', password: 'Alice-Passphrase-1' } });
+    body: { email: 'alice@example.test', password: 'Alice-Passphrase-1' } }); // gitleaks:allow (synthetic test credential)
   eq(r.data.user.mustChangePassword, true);
   await alice.fetch('/api/auth/password', { method: 'POST',
     body: { current: 'Alice-Passphrase-1', next: 'Alice-New-Passphrase-1' } });
@@ -265,7 +280,7 @@ await t('created accounts must change their password on first login', async () =
 
 await t('a member cannot create accounts or grant themselves a role', async () => {
   const r = await alice.fetch('/api/admin/users', { method: 'POST',
-    body: { email: 'evil@example.test', password: 'Evil-Passphrase-1', role: 'owner' } });
+    body: { email: 'evil@example.test', password: 'Evil-Passphrase-1', role: 'owner' } }); // gitleaks:allow (synthetic test credential)
   eq(r.status, 403);
   const p = await alice.fetch('/api/admin/users/' + ALICE, { method: 'PATCH', body: { role: 'owner' } });
   eq(p.status, 403);
@@ -279,6 +294,7 @@ await t('an admin who is not the owner cannot create administrators', async () =
     body: { email: 'admin2@example.test', password: 'Admin-Passphrase-9' } });
   await admin2.fetch('/api/auth/password', { method: 'POST',
     body: { current: 'Admin-Passphrase-9', next: 'Admin-New-Passphrase-9' } });
+  await enrol(admin2);
   const r = await admin2.fetch('/api/admin/users', { method: 'POST',
     body: { email: 'admin3@example.test', password: 'Admin-Passphrase-3', role: 'admin' } });
   eq(r.status, 403);
@@ -458,10 +474,10 @@ await t('reactivation restores access but not the old session', async () => {
 // and receives a RESTRICTED session; every protected route still refuses it (see signup.test.js).
 await t('a pending account can sign in but cannot reach protected data', async () => {
   await owner.fetch('/api/admin/users', { method: 'POST',
-    body: { email: 'pending@example.test', password: 'Pending-Passphrase-1', role: 'member', status: 'pending' } });
+    body: { email: 'pending@example.test', password: 'Pending-Passphrase-1', role: 'member', status: 'pending' } }); // gitleaks:allow (synthetic test credential)
   const p = client();
   const r = await p.fetch('/api/auth/login', { method: 'POST',
-    body: { email: 'pending@example.test', password: 'Pending-Passphrase-1' } });
+    body: { email: 'pending@example.test', password: 'Pending-Passphrase-1' } }); // gitleaks:allow (synthetic test credential)
   eq(r.status, 200);
   eq(r.data.user.accountState, 'pending_approval');
   const s = await p.fetch('/api/state');
@@ -528,14 +544,19 @@ sec('IMPORT — previewed, de-duplicated, non-destructive');
 
 await t('a preview reports what would change without changing anything', async () => {
   const c = client();
-  await c.fetch('/api/auth/login', { method: 'POST',
+  const l = await c.fetch('/api/auth/login', { method: 'POST',
     body: { email: 'owner@example.test', password: 'Owner-New-Passphrase-7' } });
+  eq(l.data.mfaRequired, true, 'the owner must give a second step');
+  eq(c.cookie && c.cookie.startsWith('recomp_mfa='), true, 'only a pending-login cookie before the code');
+  const v = await c.fetch('/api/auth/mfa/verify', { method: 'POST', body: { code: await totp(owner.secret, 1) } });
+  eq(v.status, 200);
   await c.fetch('/api/state', { method: 'PUT',
     body: { doc: { schemaVersion: 3, sessions: [{ id: 's_1', date: '2026-10-01' }], bodyweight: [{ date: '2026-10-01', kg: 86 }] } } });
   const p = await c.fetch('/api/import/preview', { method: 'POST',
     body: { doc: { schemaVersion: 3,
       sessions: [{ id: 's_1', date: '2026-10-01' }, { id: 's_2', date: '2026-10-03' }],
       bodyweight: [{ date: '2026-10-01', kg: 86 }, { date: '2026-10-05', kg: 85.5 }] } } });
+  if (!p.data.preview) throw new Error(JSON.stringify([p.status, p.data]));
   eq(p.data.preview.newSessions, 1);
   eq(p.data.preview.duplicateSessions, 1);
   eq(p.data.preview.newWeighIns, 1);
@@ -544,9 +565,7 @@ await t('a preview reports what would change without changing anything', async (
 });
 
 await t('commit merges without duplicating or losing records', async () => {
-  const c = client();
-  await c.fetch('/api/auth/login', { method: 'POST',
-    body: { email: 'owner@example.test', password: 'Owner-New-Passphrase-7' } });
+  const c = owner;                               // the owner's existing session (a second login would need a new code)
   await c.fetch('/api/import/commit', { method: 'POST',
     body: { doc: { sessions: [{ id: 's_1', date: '2026-10-01' }, { id: 's_2', date: '2026-10-03' }],
                    bodyweight: [{ date: '2026-10-05', kg: 85.5 }] } } });

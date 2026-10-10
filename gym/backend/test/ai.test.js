@@ -41,7 +41,7 @@ const fake = async (url, o) => {
   return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text }] }) };
 };
 
-const app = await startApp({ env: { ANTHROPIC_API_KEY: KEY }, fetch: fake });
+const app = await startApp({ aiOn: true,  env: { ANTHROPIC_API_KEY: KEY }, fetch: fake });
 const { db } = app;
 const owner = await app.ownerClient();
 const alice = await app.makeUser(owner, 'alice@example.test', 'member');
@@ -76,7 +76,7 @@ await t('the system prompt encodes the required rules', async () => {
 });
 await t('AI_MODEL overrides the default model', async () => {
   reset();
-  const a = await startApp({ env: { ANTHROPIC_API_KEY: KEY, AI_MODEL: 'claude-test-model' }, fetch: fake });
+  const a = await startApp({ aiOn: true,  env: { ANTHROPIC_API_KEY: KEY, AI_MODEL: 'claude-test-model' }, fetch: fake });
   const o = await a.ownerClient(); const u = await a.makeUser(o, 'm@example.test', 'member');
   const r = await post(u, payloadFor());
   eq(r.data.model, 'claude-test-model'); eq(calls[0].body.model, 'claude-test-model');
@@ -180,7 +180,7 @@ await t('validateOutput is a pure function of the payload (unit check)', async (
 sec('AI WEEKLY REVIEW: failures');
 await t('no API key => 503 ai_not_configured and nothing is sent', async () => {
   reset();
-  const a = await startApp({ fetch: fake });
+  const a = await startApp({ aiOn: true,  fetch: fake });
   const o = await a.ownerClient(); const u = await a.makeUser(o, 'k@example.test', 'member');
   const r = await post(u, payloadFor());
   eq(r.status, 503); eq(r.data.error, 'ai_not_configured'); eq(calls.length, 0);
@@ -195,7 +195,7 @@ await t('network error, non-2xx and malformed upstream bodies => 502 ai_unavaila
 });
 await t('a slow upstream is aborted and reported as 502 ai_unavailable', async () => {
   const slow = async (url, o) => new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
-  const a = await startApp({ env: { ANTHROPIC_API_KEY: KEY }, fetch: slow, aiTimeoutMs: 60 });
+  const a = await startApp({ aiOn: true,  env: { ANTHROPIC_API_KEY: KEY }, fetch: slow, aiTimeoutMs: 60 });
   const o = await a.ownerClient(); const u = await a.makeUser(o, 't@example.test', 'member');
   const t0 = Date.now(); const r = await post(u, payloadFor());
   eq(r.status, 502); eq(r.data.error, 'ai_unavailable'); ok(Date.now() - t0 < 3000);
@@ -271,7 +271,7 @@ sec('AI WEEKLY REVIEW: access, isolation and limits');
 await t('signed-out, pending, suspended and permission-less users are all refused', async () => {
   reset();
   eq((await app.client().post('/api/ai/weekly-review', { payload: payloadFor() })).status, 401);
-  const sc = app.client(); await sc.post('/api/auth/signup', { name: 'Pen Ding', email: 'pending@example.test', password: 'Pending-Pass-123', website: '' });
+  const sc = app.client(); await sc.post('/api/auth/signup', { name: 'Pen Ding', email: 'pending@example.test', password: 'Pending-Pass-123', website: '', privacyNoticeVersion: 'v1', healthConsent: true });
   const pr = await sc.post('/api/ai/weekly-review', { payload: payloadFor() });
   eq(pr.status, 403); eq(pr.data.code, 'pending');
   const sus = await app.makeUser(owner, 'sus@example.test', 'member');

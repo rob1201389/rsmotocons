@@ -1,3 +1,4 @@
+import { sharingAllowed } from './account.js';
 /* Roles, features and per-user overrides.
 
    Enforcement is server-side on every request. The browser is told what it may
@@ -58,5 +59,7 @@ export async function mayAccessUserData(db, actor, targetId) {
     'SELECT 1 AS x FROM coach_assignments WHERE coach_id = ? AND member_id = ?', actor.id, targetId);
   if (!row) return { ok: false, reason: 'not_assigned' };
   if (!can(actor, 'reviews')) return { ok: false, reason: 'no_reviews_permission' };
+  // The member decides: with sharing off, no reviewer can read their records.
+  if (!(await sharingAllowed(db, targetId))) return { ok: false, reason: 'sharing_off' };
   return { ok: true, scope: 'assigned' };
 }

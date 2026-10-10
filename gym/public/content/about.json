@@ -1,0 +1,140 @@
+{
+ "key": "about",
+ "title": "About Recomp",
+ "version": "2026-10-11.1",
+ "updated": "2026-10-11",
+ "status": "published",
+ "summary": "Recomp helps you train consistently. It builds a plan around your goals, shows you exactly how and why it progresses, and uses what you tell it each week to shape what comes next.",
+ "blocks": [
+  {
+   "t": "h2",
+   "id": "purpose",
+   "text": "What Recomp is for"
+  },
+  {
+   "t": "p",
+   "text": "Most people do not stall because they lack a program. They stall because the program does not respond to them. Recomp is built around three ideas:"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "**Consistent training** with a personalised plan that fits the days, time and equipment you actually have.",
+    "**Progression you can understand.** Every change to your plan comes with a plain reason you can read.",
+    "**Feedback that counts.** What you log and what you write each week informs the next week of training."
+   ]
+  },
+  {
+   "t": "h2",
+   "id": "how-it-fits",
+   "text": "How the parts fit together"
+  },
+  {
+   "t": "h3",
+   "id": "plans",
+   "text": "Goal-based plans and double progression"
+  },
+  {
+   "t": "p",
+   "text": "You set a goal, your available days and session length, and the equipment you can use. Recomp builds a weekly plan from that. Lifts progress with double progression: you first earn more repetitions at the same weight, then the weight goes up. Extra reps at an unchanged weight count as real progress, not as standing still."
+  },
+  {
+   "t": "p",
+   "text": "Plan changes are saved as versions, so you can see what changed, when and why. Suggested changes wait for your confirmation."
+  },
+  {
+   "t": "h3",
+   "id": "exercise-guidance",
+   "text": "Exercise guidance"
+  },
+  {
+   "t": "p",
+   "text": "Each exercise has written cues and a simplified diagram. There are no videos. The guidance is general and has not been reviewed by a coach, physiotherapist or other qualified professional."
+  },
+  {
+   "t": "h3",
+   "id": "stretch-recovery",
+   "text": "Stretch and recovery routines"
+  },
+  {
+   "t": "p",
+   "text": "Short stretch and recovery routines support general mobility and help you plan easier days. They are not rehabilitation and are not designed to treat an injury."
+  },
+  {
+   "t": "h3",
+   "id": "nutrition",
+   "text": "Nutrition"
+  },
+  {
+   "t": "p",
+   "text": "Recomp gives you three things for nutrition:"
+  },
+  {
+   "t": "ul",
+   "items": [
+    "**Daily targets** for calories, protein, carbohydrate and fat, estimated from your bodyweight and the settings you choose. They are formula estimates, not measurements.",
+    "**A suggested meal plan** that scales a simple set of everyday foods to meet those targets.",
+    "**An intake log** where you enter the calories and protein you ate each day."
+   ]
+  },
+  {
+   "t": "note",
+   "text": "A recipes library is not part of Recomp today. It may be added later."
+  },
+  {
+   "t": "h3",
+   "id": "weekly-reviews",
+   "text": "Weekly check-ins and reviews"
+  },
+  {
+   "t": "p",
+   "text": "Once a week you answer a short check-in and Recomp prepares a review of the week: sessions completed, rep and load gains, recovery, and anything that needs attention, such as pain you reported. You decide which proposed changes to accept."
+  },
+  {
+   "t": "p",
+   "text": "**Optional AI-assisted wording.** The app calculates every number in the review itself. If you turn it on and the operator has set it up, an AI service can write the summary in plain language, using only the statistics and your written updates for that week. It is off unless you switch it on, and the review works fully without it. The AI is a writing aid, not a qualified trainer."
+  },
+  {
+   "t": "p",
+   "text": "If your account has an assigned coach, you can choose to send your weekly review to them for feedback."
+  },
+  {
+   "t": "h3",
+   "id": "garmin",
+   "text": "Garmin data you upload"
+  },
+  {
+   "t": "p",
+   "text": "You can import files you download from Garmin Connect or from a Garmin data export: activity CSV files, TCX activity files and sleep JSON files. The files are read on your device and only the summary figures are kept, such as sleep duration and score, and activity duration, distance, calories and heart rate. FIT files are not supported, and there is no automatic sync. Old data is labelled with its dates and is never presented as today's readiness."
+  },
+  {
+   "t": "note",
+   "text": "Recomp is not affiliated with, endorsed by or an official partner of Garmin. Garmin is a trademark of its owner."
+  },
+  {
+   "t": "h2",
+   "id": "not-medical-advice",
+   "text": "Your decisions come first"
+  },
+  {
+   "t": "p",
+   "text": "Recomp's suggestions are there to support your decisions. They are not medical advice and are not a substitute for a doctor, physiotherapist, dietitian or other qualified professional. If you have pain, an injury or a health condition, talk to a qualified health professional before changing your training or diet."
+  },
+  {
+   "t": "h2",
+   "id": "who-runs-recomp",
+   "text": "Who runs Recomp"
+  },
+  {
+   "t": "p",
+   "text": "Recomp is operated by {{operator.legalName}} ({{operator.name}}), ABN {{operator.abn}}, based in {{operator.country}}."
+  },
+  {
+   "t": "p",
+   "text": "Privacy questions: {{operator.privacyEmail}}. Postal address: {{operator.address}}."
+  },
+  {
+   "t": "p",
+   "text": "Read the [privacy policy](#privacy) or see [why Recomp](#why)."
+  }
+ ]
+}

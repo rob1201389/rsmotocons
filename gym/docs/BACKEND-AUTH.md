@@ -98,6 +98,11 @@ Secrets are set with `wrangler secret put NAME`; nothing is in the source or `wr
 | `PUBLIC_URL` | base for `/?verify=` and `/?reset=` links, else the request origin | **no** |
 | `ANTHROPIC_API_KEY` | enables the AI weekly review | **no** (endpoint answers 503 `ai_not_configured`) |
 | `AI_MODEL` | model id, default `claude-sonnet-5-5` | **no** (default used) |
+| `DATA_ENC_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts the state document, weekly reports, review messages, admin notes, request messages and TOTP secrets with AES-256-GCM. **Losing it makes that data unreadable.** Keep a copy offline | **no** (data stored unencrypted at the application layer; D1 still encrypts at rest) |
+| `DATA_ENC_KEY_ID` | short label written with each value, default `k1`. Change it when rotating | **no** |
+| `DATA_ENC_KEY_PREVIOUS` | the old key during a rotation, so older values stay readable until rewritten | **no** |
+| `HIBP_CHECK` | `off` disables breached-password screening (tests only) | **no** (screening on) |
+| `RP_ID` | passkey relying-party id, else the host of `PUBLIC_URL`, else the request host | **no** |
 
 Until email is configured, new people cannot receive a confirmation link; an
 administrator can attest the address or approve with the audited override.

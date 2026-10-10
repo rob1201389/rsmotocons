@@ -39,11 +39,23 @@ const AUTH = (function () {
   function nsKey(userId, name) { return `recomp.u.${userId}.${name}`; }
 
   function wipeAccount(userId) {
+    const prefix = `recomp.u.${userId}.`;
     try {
-      const prefix = `recomp.u.${userId}.`;
       Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
     } catch (e) {}
-    try { indexedDB.deleteDatabase('recompDB.' + userId); } catch (e) {}
+    // The app keeps its offline copy in recompDB/kv under recomp.u.<id>.*; remove those keys.
+    try {
+      const rq = indexedDB.open('recompDB', 2);
+      rq.onupgradeneeded = () => { try { rq.result.createObjectStore('kv'); } catch (e) {} };
+      rq.onsuccess = () => {
+        try {
+          const db = rq.result, st = db.transaction('kv', 'readwrite').objectStore('kv');
+          const kr = st.getAllKeys();
+          kr.onsuccess = () => { (kr.result || []).filter(k => String(k).startsWith(prefix)).forEach(k => st.delete(k)); };
+          st.transaction.oncomplete = () => db.close();
+        } catch (e) {}
+      };
+    } catch (e) {}
   }
   function wipeAllAccounts() {
     try {
@@ -113,8 +125,10 @@ const AUTH = (function () {
     }
   }
 
-  async function setup(email, password) {
-    const r = await api('/api/auth/setup', { method: 'POST', body: { email, password } });
+  async function setup(email, password, consent) {
+    consent = consent || {};
+    const r = await api('/api/auth/setup', { method: 'POST', body: { email, password,
+      privacyNoticeVersion: consent.privacyNoticeVersion || undefined, healthConsent: consent.healthConsent === true ? true : undefined } });
     if (r.status !== 200) return { ok: false, error: r.data.error || 'Setup failed.' };
     session = { user: r.data.user };
     lastVerifiedAt = Date.now();
@@ -129,26 +143,88 @@ const AUTH = (function () {
   async function login(email, password) {
     const r = await api('/api/auth/login', { method: 'POST', body: { email, password } });
     if (r.status !== 200) return { ok: false, error: r.data.error || 'Sign-in failed.',
-                                   accountStatus: r.data.accountStatus };
+                                   accountStatus: r.data.accountStatus, code: r.data.code || null };
+    /* Two-step verification: no session exists yet, only a short-lived pending login. */
+    if (r.data.mfaRequired) return { ok: true, mfaRequired: true, methods: r.data.methods || ['totp', 'recovery'] };
+    return establish(r.data.user);
+  }
+  async function mfaVerify(body) {
+    const r = await api('/api/auth/mfa/verify', { method: 'POST', body });
+    if (r.status !== 200) return { ok: false, error: r.data.error || 'That code did not work.', code: r.data.code || null, expired: r.status === 401 };
+    return establish(r.data.user);
+  }
+  /* Passkey sign-in (WebAuthn). Resolves like login(); a cancelled prompt resolves { ok:false, cancelled:true }. */
+  async function passkeyLogin(email) {
+    if (!passkeysAvailable()) return { ok: false, error: 'Passkeys are not available in this browser.' };
+    const b = await api('/api/auth/passkey/login/begin', { method: 'POST', body: email ? { email } : {} });
+    if (b.status !== 200) return { ok: false, error: b.data.error || 'Passkey sign-in is not available.' };
+    let cred;
+    try { cred = await navigator.credentials.get({ publicKey: decodeRequest(b.data.options || b.data) }); }
+    catch (e) { return { ok: false, cancelled: true, error: 'The passkey prompt was closed.' }; }
+    const r = await api('/api/auth/passkey/login/finish', { method: 'POST', body: { challengeId: b.data.challengeId, credential: encodeAssertion(cred) } });
+    if (r.status !== 200) return { ok: false, error: r.data.error || 'That passkey was not accepted.' };
+    if (r.data.mfaRequired) return { ok: true, mfaRequired: true, methods: r.data.methods };
+    return establish(r.data.user);
+  }
+  async function passkeyRegister(label) {
+    if (!passkeysAvailable()) return { ok: false, error: 'Passkeys are not available in this browser.' };
+    const b = await api('/api/auth/passkey/register/begin', { method: 'POST', body: {} });
+    if (b.status !== 200) return { ok: false, error: b.data.error || 'Could not start passkey set-up.', code: b.data.code || null };
+    let cred;
+    try { cred = await navigator.credentials.create({ publicKey: decodeCreation(b.data.options || b.data) }); }
+    catch (e) { return { ok: false, cancelled: true, error: 'The passkey prompt was closed.' }; }
+    const r = await api('/api/auth/passkey/register/finish', { method: 'POST', body: { challengeId: b.data.challengeId, label: label || '', credential: encodeAttestation(cred) } });
+    return shape(r, 'That passkey could not be saved.');
+  }
+  function passkeysAvailable() { return typeof window !== 'undefined' && !!window.PublicKeyCredential && !!(navigator.credentials && navigator.credentials.create); }
+  const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const unb64u = s => { const t = String(s).replace(/-/g, '+').replace(/_/g, '/'); const bin = atob(t + '==='.slice((t.length + 3) % 4)); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out.buffer; };
+  function decodeRequest(o) {
+    return Object.assign({}, o, { challenge: unb64u(o.challenge), allowCredentials: (o.allowCredentials || []).map(c => Object.assign({}, c, { id: unb64u(c.id) })) });
+  }
+  function decodeCreation(o) {
+    return Object.assign({}, o, { challenge: unb64u(o.challenge), user: Object.assign({}, o.user, { id: unb64u(o.user.id) }),
+      excludeCredentials: (o.excludeCredentials || []).map(c => Object.assign({}, c, { id: unb64u(c.id) })) });
+  }
+  function encodeAssertion(c) {
+    return { id: c.id, rawId: b64u(c.rawId), type: c.type, response: { clientDataJSON: b64u(c.response.clientDataJSON), authenticatorData: b64u(c.response.authenticatorData),
+      signature: b64u(c.response.signature), userHandle: c.response.userHandle ? b64u(c.response.userHandle) : null } };
+  }
+  function encodeAttestation(c) {
+    return { id: c.id, rawId: b64u(c.rawId), type: c.type, response: { clientDataJSON: b64u(c.response.clientDataJSON), attestationObject: b64u(c.response.attestationObject),
+      transports: c.response.getTransports ? c.response.getTransports() : [] } };
+  }
+  async function establish(u) {
     const previous = localStorage.getItem('recomp.lastUser');
-    if (previous && previous !== r.data.user.id) {
+    if (previous && previous !== u.id) {
       // A different account on this device: clear the old one's cache first.
       wipeAccount(previous);
       await wipeCaches();
     }
-    if (isPendingUser(r.data.user)) {
-      session = null; pendingUser = r.data.user;
-      return { ok: true, user: r.data.user, pending: true };
+    if (isPendingUser(u)) {
+      session = null; pendingUser = u;
+      return { ok: true, user: u, pending: true };
     }
     pendingUser = null;
-    session = { user: r.data.user };
+    session = { user: u };
     lastVerifiedAt = Date.now();
     try {
       localStorage.setItem('recomp.lastVerified', String(lastVerifiedAt));
-      localStorage.setItem('recomp.lastUser', r.data.user.id);
-      localStorage.setItem(nsKey(r.data.user.id, 'user'), JSON.stringify(r.data.user));
+      localStorage.setItem('recomp.lastUser', u.id);
+      localStorage.setItem(nsKey(u.id, 'user'), JSON.stringify(u));
     } catch (e) {}
+    return { ok: true, user: u };
+  }
+  /* Re-read the signed-in user (after MFA, consent or settings changes). */
+  async function refreshUser() {
+    const r = await api('/api/auth/me');
+    if (r.status !== 200 || !r.data.user) return { ok: false, status: r.status, code: r.data.code || null };
+    if (session) { session.user = r.data.user; try { localStorage.setItem(nsKey(r.data.user.id, 'user'), JSON.stringify(r.data.user)); } catch (e) {} }
     return { ok: true, user: r.data.user };
+  }
+  /* Any other JSON call: resolves { ok, status, data, error, code }, never throws for HTTP errors. */
+  async function call(method, path, body, fallback) {
+    return shape(await api(path, { method, body }), fallback || 'That did not work. Try again.');
   }
 
   async function logout() {
@@ -202,7 +278,8 @@ const AUTH = (function () {
   }
   async function signup(f) {
     const r = await api('/api/auth/signup', { method: 'POST', body: {
-      name: f.name, email: f.email, password: f.password, website: f.website || '' } });
+      name: f.name, email: f.email, password: f.password, website: f.website || '',
+      privacyNoticeVersion: f.privacyNoticeVersion || '', healthConsent: f.healthConsent === true } });
     return shape(r, 'Could not create your account.');
   }
   async function verify(token) {
@@ -267,7 +344,7 @@ const AUTH = (function () {
     return u ? nsKey(u.id, name) : `recomp.anon.${name}`;
   }
 
-  return { api, refresh, setup, login, logout, changePassword, pullState, pushState,
+  return { api, call, refreshUser, mfaVerify, passkeyLogin, passkeyRegister, passkeysAvailable, refresh, setup, login, logout, changePassword, pullState, pushState,
            signup, verify, resendVerification, accountStatus, forgot, reset,
            adminRequests, adminDecision, adminVerifyEmail, adminNoteGet, adminNotePut, adminUpdateUser,
            user, pending, can, isOffline, localKey, wipeAccount, wipeAllAccounts, wipeCaches,

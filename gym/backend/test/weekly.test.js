@@ -152,7 +152,7 @@ await t('a suspended coach and a pending user are refused', async () => {
   const cc = await app.makeUser(owner, 'coach9@example.test', 'coach'); await assign(cc, carol);
   await owner.patch(`/api/admin/users/${cc.id}`, { status: 'suspended' });
   eq((await cc.c.patch(`/api/weekly-submissions/${s2.id}`, { action: 'approve' })).status, 401);
-  const p = app.client(); await p.post('/api/auth/signup', { name: 'Pen Ding', email: 'pend@example.test', password: 'Pending-Pass-123', website: '' });
+  const p = app.client(); await p.post('/api/auth/signup', { name: 'Pen Ding', email: 'pend@example.test', password: 'Pending-Pass-123', website: '', privacyNoticeVersion: 'v1', healthConsent: true });
   for (const [m, path] of [['GET', '/api/weekly-submissions'], ['GET', '/api/weekly-submissions?inbox=1'], ['POST', '/api/weekly-submissions'], ['PATCH', `/api/weekly-submissions/${s2.id}`]]) {
     const r = await p.fetch(path, { method: m, body: m === 'GET' ? undefined : {} });
     eq(r.status, 403, m + path); eq(r.data.code, 'pending');

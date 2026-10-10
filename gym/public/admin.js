@@ -205,7 +205,7 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
     t.focus();
   }
   function onKey(e) {
-    if (!st.open) return;
+    if (!st.open || st.paused) return;
     if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation();
       if (st.busy) return;
@@ -223,9 +223,20 @@ fieldset.adm-f{border:0;padding:0;margin:0 0 14px;min-width:0}
   }
 
   /* -------------------------------------------------------- data ------ */
+  /* Sensitive admin actions need a recent password (and code) check. The server
+     says so with code 'reauth_required'; ask once above this screen and retry. */
   async function call(fn) {
-    try { return await fn(); }
-    catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    let r;
+    try { r = await fn(); } catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    if (r && r.code === 'reauth_required' && window.Settings) {
+      st.paused = true; inertBackground(false); root.setAttribute('inert', ''); document.body.classList.add('adm-reauth');
+      let ok = false;
+      try { ok = await Settings.askReauth('Confirm it is you before changing someone\'s access.'); }
+      finally { root.removeAttribute('inert'); document.body.classList.remove('adm-reauth'); inertBackground(true); st.paused = false; }
+      if (!ok) return { ok: false, status: 403, error: 'Not changed: your identity was not confirmed.', data: {}, code: 'reauth_cancelled' };
+      try { r = await fn(); } catch (e) { return { ok: false, status: 0, error: OFFLINE, data: {} }; }
+    }
+    return r;
   }
   function explain(r) {
     if (r.status === 0) return OFFLINE;
