@@ -8,12 +8,12 @@
    3. skipWaiting() ran unconditionally, so deploying mid-workout could swap the
       running code. The new worker waits, and activates only when the page says
       it is safe. */
-const VERSION = 'v4';
+const VERSION = 'v6';
 const CACHE_PREFIX = 'recomp-';
 const CACHE = CACHE_PREFIX + VERSION;
 
 const SHELL = ['./', './index.html', './app.js', './core.js', './engine.js', './exercises.js',
-  './figure.js', './lifts.js', './stretches.js', './manifest.webmanifest',
+  './authclient.js', './figure.js', './lifts.js', './stretches.js', './manifest.webmanifest',
   './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -57,6 +57,17 @@ self.addEventListener('fetch', e => {
   const sameOrigin = url.origin === location.origin;
   const isFont = /fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
   if (!sameOrigin && !isFont) return;        // never touch anything else
+
+  /* Authenticated API responses are never cached, never served from cache and
+     never revalidated in the background. A shared device must not be able to
+     read the previous account's data out of the cache, and a revoked account
+     must not keep working because its last response is still sitting here. */
+  if (sameOrigin && url.pathname.startsWith('/api/')) {
+    e.respondWith(fetch(req).catch(() => new Response(
+      JSON.stringify({ error: 'offline', offline: true }),
+      { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })));
+    return;
+  }
 
   // Navigations: network first, fall back to the cached page. This is the ONLY
   // case where returning index.html is correct.

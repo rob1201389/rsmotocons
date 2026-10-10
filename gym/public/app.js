@@ -12,7 +12,13 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
 /* ------------------------------------------------------------- storage --- */
-const KEY = 'recomp.v3';
+/* The storage key is namespaced per account. Two people on one phone get two
+   separate documents, and logging out deletes the one that belongs to the
+   account signing out. */
+let KEY = 'recomp.v3';
+function setStorageScope(userId) {
+  KEY = userId ? `recomp.u.${userId}.state` : 'recomp.v3';
+}
 let hasLS = false, idb = null, memOnly = {};
 function openIDB() {
   return new Promise(res => {
@@ -50,6 +56,46 @@ async function loadRaw() {
   if (a && b) return ((b._savedAt||0) > (a._savedAt||0)) ? b : a;
   return a || b || null;
 }
+/* Server sync. Local is the working copy so the app stays usable offline;
+   the server is the record. A push failure never loses the local write. */
+let serverVersion = 0, syncing = false, pendingPush = false, lastSyncAt = 0;
+async function pushToServer() {
+  if (!window.AUTH || !AUTH.user() || AUTH.isOffline()) { pendingPush = true; return false; }
+  if (syncing) { pendingPush = true; return false; }
+  syncing = true;
+  try {
+    const r = await AUTH.pushState(S, serverVersion || undefined);
+    if (r.ok) { serverVersion = r.version; lastSyncAt = Date.now(); pendingPush = false; return true; }
+    if (r.conflict) {
+      // Another device saved first. Pull, merge sessions by id, push again.
+      const pull = await AUTH.pullState();
+      if (pull.ok && pull.doc) {
+        const seen = new Set((S.sessions || []).map(x => x.id));
+        (pull.doc.sessions || []).forEach(x => { if (!seen.has(x.id)) S.sessions.push(x); });
+        const bw = new Set((S.bodyweight || []).map(x => x.date));
+        (pull.doc.bodyweight || []).forEach(x => { if (!bw.has(x.date)) S.bodyweight.push(x); });
+        serverVersion = pull.version;
+        const again = await AUTH.pushState(S, serverVersion);
+        if (again.ok) { serverVersion = again.version; pendingPush = false; return true; }
+      }
+    }
+    if (r.forbidden) { toast('Your access to training data was removed', 'bad'); }
+    pendingPush = true; return false;
+  } catch (e) { pendingPush = true; return false; }
+  finally { syncing = false; updateSyncBadge(); }
+}
+function updateSyncBadge() {
+  const b = $('#storeBadge'); if (!b) return;
+  if (!window.AUTH || !AUTH.user()) { b.textContent = storageLabel(); return; }
+  if (AUTH.isOffline()) { b.textContent = 'Offline'; return; }
+  b.textContent = pendingPush ? 'Syncing…' : 'Synced';
+}
+let pushTimer = null;
+function schedulePush() {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => pushToServer(), 1200);
+}
+
 let saveFailed = false;
 async function persist() {
   S._savedAt = Date.now();
@@ -60,6 +106,7 @@ async function persist() {
   if (!ok) memOnly[KEY] = S;
   if (!ok && !saveFailed) { saveFailed = true; banner('bad', 'Not saving to this device', 'Private browsing or full storage. Your session is held in memory only — back up before you close the app.'); }
   if (ok && saveFailed) { saveFailed = false; renderAll(); }
+  schedulePush();
   return ok;
 }
 function storageLabel() {
@@ -331,7 +378,34 @@ function abandonSession(quiet) {
 /* ============================================================== render === */
 const TITLES = { today:'Today', train:'Train', progress:'Progress', library:'Library', profile:'Profile' };
 let tab = 'today';
+const TAB_FEATURE = { today:'training', train:'training', progress:'progress',
+                      library:'library', profile:null };
+function tabAllowed(t) {
+  const f = TAB_FEATURE[t];
+  if (!f) return true;
+  if (!window.AUTH || !AUTH.user()) return true;      // no backend: local-only mode
+  return AUTH.can(f);
+}
+function applyPermissions() {
+  if (!window.AUTH || !AUTH.user()) return;
+  ['today','train','progress','library','profile'].forEach(t => {
+    const b = document.querySelector(`[data-tab="${t}"]`);
+    if (b) b.hidden = !tabAllowed(t);
+  });
+  const fuel = $('#fuelCard');
+  if (fuel) {
+    const ok = AUTH.can('nutrition');
+    const section = fuel.previousElementSibling;
+    fuel.hidden = !ok; if (section && section.tagName === 'H2') section.hidden = !ok;
+  }
+  if (!tabAllowed(tab)) {
+    const first = ['today','train','progress','library','profile'].find(tabAllowed);
+    if (first) go(first);
+  }
+}
+
 function go(t) {
+  if (!tabAllowed(t)) { toast('That section is not enabled for your account', 'warn'); return; }
   tab = t;
   ['today','train','progress','library','profile'].forEach(x => {
     document.getElementById('p-' + x).hidden = x !== t;
@@ -341,6 +415,7 @@ function go(t) {
   $('#screenTitle').textContent = TITLES[t];
   window.scrollTo(0, 0);
   renderAll();
+  applyPermissions();
 }
 $$('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
 
@@ -1322,35 +1397,244 @@ $('#bwSave').onclick = () => {
   persist(); renderProgress(); toast('Logged', null, true);
 };
 
-/* --------------------------------------------------------- lifecycle ---- */
-window.addEventListener('online',  () => { $('#offlineBadge').hidden = true; });
-window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; });
 
-(async function boot() {
-  await initStorage();
-  const raw = await loadRaw();
-  const res = migrate(raw, { dayOfExercise: dayOfExerciseMap(), exIndex: EX_INDEX, variantMap: LEGACY_ID_MAP });
+/* ============================================================================
+   AUTH GATE
+   The app does not render until the server says who you are. When there is no
+   backend (a static deployment, or the API unreachable on first run) the app
+   falls back to local-only mode rather than locking you out of your own data.
+   ========================================================================== */
+let AUTH_MODE = 'local';     // local | server | offline
+
+function showGate(view, opts) {
+  opts = opts || {};
+  const gate = $('#authGate');
+  gate.hidden = false;
+  document.body.classList.add('locked');
+  $('#loginForm').hidden = view !== 'login';
+  $('#pwForm').hidden = view !== 'password';
+  $('#authBlocked').hidden = view !== 'blocked';
+  $('#authHeading').textContent =
+    view === 'password' ? 'New password' : view === 'blocked' ? 'No access' : 'Sign in';
+  $('#authSub').textContent =
+    view === 'password' ? 'This replaces the temporary password you were given.'
+    : view === 'blocked' ? ''
+    : 'Your training data is private to your account.';
+  if (view === 'blocked') $('#authBlockedMsg').textContent = opts.message || '';
+  $('#authFoot').textContent = opts.foot || '';
+  const focus = gate.querySelector('form:not([hidden]) input, #authBackBtn');
+  if (focus) setTimeout(() => focus.focus(), 80);
+}
+function hideGate() {
+  $('#authGate').hidden = true;
+  document.body.classList.remove('locked');
+}
+
+$('#loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('#loginBtn'), errEl = $('#loginError');
+  errEl.hidden = true; btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const r = await AUTH.login($('#loginEmail').value.trim(), $('#loginPassword').value);
+    if (!r.ok) {
+      errEl.textContent = r.error; errEl.hidden = false;
+      if (r.accountStatus && r.accountStatus !== 'active') {
+        showGate('blocked', { message: r.error });
+      }
+      return;
+    }
+    $('#loginPassword').value = '';
+    await afterSignIn(r.user);
+  } catch (e2) {
+    errEl.textContent = 'Could not reach the server. Check your connection.';
+    errEl.hidden = false;
+  } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+});
+
+$('#pwForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const errEl = $('#pwError'); errEl.hidden = true;
+  const next = $('#pwNext').value, confirm2 = $('#pwConfirm').value;
+  if (next !== confirm2) { errEl.textContent = 'The two new passwords do not match.'; errEl.hidden = false; return; }
+  const btn = $('#pwBtn'); btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await AUTH.changePassword($('#pwCurrent').value, next);
+    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
+    $('#pwCurrent').value = $('#pwNext').value = $('#pwConfirm').value = '';
+    await afterSignIn(AUTH.user());
+  } finally { btn.disabled = false; btn.textContent = 'Set password and continue'; }
+});
+
+$('#authBackBtn').addEventListener('click', () => showGate('login'));
+
+/* One initialisation path, shared by first boot and by signing in. Takes the
+   server document when there is one, otherwise whatever is on this device. */
+async function initialiseState(serverDoc) {
+  let source = serverDoc;
+  if (!source) source = await loadRaw();
+  const res = migrate(source, { dayOfExercise: dayOfExerciseMap(), exIndex: EX_INDEX, variantMap: LEGACY_ID_MAP });
   if (!res.state) {
     document.body.innerHTML = `<div class="wrap" style="padding:40px 16px">
-      <h1>Can't open your data</h1><p class="muted">${esc(res.error)}</p>
-      <p class="muted">Update the app, or restore an older backup.</p></div>`;
-    return;
+      <h1>Can't open your data</h1><p class="muted">${esc(res.error || '')}</p></div>`;
+    return false;
   }
   S = res.state; S._exIndex = EX_INDEX;
-  if (res.migrated) {
-    recomputeBests(S, EX_INDEX);
-    await persist();
-  }
-  if (S._timer && S._timer.end > Date.now()) {       // restore a running rest timer
+  if (res.migrated) recomputeBests(S, EX_INDEX);
+  if (S._timer && S._timer.end > Date.now()) {
     tmTotal = S._timer.total; tmEnd = S._timer.end;
     $('#tmLabel').textContent = S._timer.label || 'Rest';
     $('#tmSub').textContent = S._timer.sub || '';
     $('#timer').classList.add('on'); paintTimer(); tmInt = setInterval(paintTimer, 250);
   } else if (S._timer) { delete S._timer; }
   applyTheme();
-  if (!navigator.onLine) $('#offlineBadge').hidden = false;
+  return res;
+}
+
+/* Signed in: scope local storage to this account, load from the server, and
+   offer to bring across anything that was stored locally before accounts. */
+async function afterSignIn(user) {
+  if (user.mustChangePassword) { showGate('password'); return; }
+  AUTH_MODE = 'server';
+  setStorageScope(user.id);
+
+  const legacy = await readLegacyLocal();
+  const pulled = await AUTH.pullState();
+  if (pulled.forbidden) {
+    showGate('blocked', { message: pulled.error || 'Training data is not enabled for your account.' });
+    return;
+  }
+  if (pulled.ok) serverVersion = pulled.version || 0;
+
+  const res = await initialiseState(pulled.ok ? pulled.doc : null);
+  if (!res) return;
+
+  hideGate();
+  recomputeBests(S, EX_INDEX);
+  await persist();
   currentSession();
   go('today');
+  applyPermissions();
+  updateAccountButton();
+
+  if (legacy && (legacy.sessions || []).length) offerLegacyImport(legacy);
+}
+
+/* Data written before accounts existed, under the old unscoped key. */
+async function readLegacyLocal() {
+  try {
+    const raw = localStorage.getItem('recomp.v3') || localStorage.getItem('recomp');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return (parsed && (parsed.sessions || parsed.logs)) ? parsed : null;
+  } catch (e) { return null; }
+}
+async function offerLegacyImport(legacy) {
+  const res = migrate(legacy, { dayOfExercise: dayOfExerciseMap(), exIndex: EX_INDEX, variantMap: LEGACY_ID_MAP });
+  if (!res.state) return;
+  const doc = res.state;
+  const r = await AUTH.api('/api/import/preview', { method: 'POST', body: { doc } });
+  if (r.status !== 200) return;
+  const p = r.data.preview;
+  if (!p.newSessions && !p.newWeighIns) return;
+  const msg = `This device has ${p.incomingSessions} session${p.incomingSessions === 1 ? '' : 's'} saved ` +
+    `from before you had an account.\n\n` +
+    `New to your account: ${p.newSessions} session${p.newSessions === 1 ? '' : 's'}, ` +
+    `${p.newWeighIns} weigh-in${p.newWeighIns === 1 ? '' : 's'}.\n` +
+    `Already there: ${p.duplicateSessions}.\n\n` +
+    `Import them? Nothing is deleted and duplicates are skipped.`;
+  if (!confirm(msg)) return;
+  const c = await AUTH.api('/api/import/commit', { method: 'POST', body: { doc } });
+  if (c.status === 200) {
+    const pulled = await AUTH.pullState();
+    if (pulled.ok && pulled.doc) {
+      const m2 = migrate(pulled.doc, { dayOfExercise: dayOfExerciseMap(), exIndex: EX_INDEX, variantMap: LEGACY_ID_MAP });
+      if (m2.state) { S = m2.state; S._exIndex = EX_INDEX; serverVersion = pulled.version; }
+    }
+    try { localStorage.removeItem('recomp.v3'); localStorage.removeItem('recomp'); } catch (e) {}
+    recomputeBests(S, EX_INDEX); await persist(); renderAll();
+    toast(`Imported ${c.data.sessions} sessions into your account`);
+  }
+}
+
+function updateAccountButton() {
+  const b = $('#acctBtn');
+  if (AUTH_MODE === 'local') { b.hidden = true; return; }
+  if (!window.AUTH || !AUTH.user()) { b.hidden = true; return; }
+  const u = AUTH.user();
+  b.hidden = false;
+  b.textContent = (u.name || u.email).split('@')[0];
+  b.title = `${u.email} · ${u.role}`;
+  b.onclick = async () => {
+    if (!confirm(`Signed in as ${u.email}.\n\nSign out? Anything not yet synced stays on this device until you sign back in.`)) return;
+    await AUTH.logout();
+    S = blankState(); S._exIndex = EX_INDEX;
+    setStorageScope(null);
+    AUTH_MODE = 'local';
+    location.reload();
+  };
+}
+
+/* Decide how the app starts. */
+async function resolveSession() {
+  if (!window.AUTH) return { mode: 'local' };
+  let r;
+  try { r = await AUTH.refresh(); } catch (e) { return { mode: 'local' }; }
+  if (r.state === 'authenticated') {
+    if (r.user.mustChangePassword) { showGate('password'); return { mode: 'gate' }; }
+    setStorageScope(r.user.id);
+    return { mode: 'server', user: r.user };
+  }
+  if (r.state === 'offline') {
+    setStorageScope(r.user.id);
+    const hours = Math.round(r.expiresInMs / 3600000);
+    return { mode: 'offline', user: r.user, note:
+      `Working offline. Your account is re-checked when you reconnect; offline access lasts about ${hours} more hours.` };
+  }
+  if (r.state === 'offline_expired') {
+    showGate('login', { foot: r.message });
+    return { mode: 'gate' };
+  }
+  if (r.state === 'anonymous') { showGate('login'); return { mode: 'gate' }; }
+  if (r.state === 'no_backend') return { mode: 'local' };   // static deploy, no accounts
+  return { mode: 'local' };
+}
+
+/* --------------------------------------------------------- lifecycle ---- */
+window.addEventListener('online',  () => {
+  $('#offlineBadge').hidden = true;
+  if (AUTH_MODE !== 'local' && window.AUTH) {
+    AUTH.refresh().then(r => {
+      if (r.state === 'authenticated') { pushToServer(); updateSyncBadge(); }
+      else if (r.state === 'anonymous') { showGate('login', { foot: 'Your session ended. Sign in to keep syncing.' }); }
+    });
+  }
+});
+window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; });
+
+(async function boot() {
+  await initStorage();
+
+  /* Who is this? The answer decides which storage namespace to open. */
+  const sess = await resolveSession();
+  if (sess.mode === 'gate') return;                   // the gate owns the screen
+  AUTH_MODE = sess.mode;
+
+  let serverDoc = null;
+  if (AUTH_MODE === 'server') {
+    const pulled = await AUTH.pullState();
+    if (pulled.forbidden) { showGate('blocked', { message: pulled.error }); return; }
+    if (pulled.ok) { serverDoc = pulled.doc; serverVersion = pulled.version || 0; }
+  }
+  const res = await initialiseState(serverDoc);
+  if (!res) return;
+  if (res.migrated) await persist();
+  if (!navigator.onLine) $('#offlineBadge').hidden = false;
+  if (AUTH_MODE === 'server' || AUTH_MODE === 'offline') { hideGate(); updateAccountButton(); }
+
+  currentSession();
+  go('today');
+  applyPermissions();
+  if (sess.note) banner('ok', 'Offline', sess.note);
   if (res.migrated) {
     banner('ok','Your data was upgraded',
       `${S.sessions.length} sessions were rebuilt from week-numbered logs into dated sessions. Records were recalculated from the actual sets. Dates for migrated sessions are estimated where the old data had no timestamp.`);
@@ -1392,6 +1676,8 @@ window.__recomp = {
   EXERCISES, EX_INDEX, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
   makeBackup, validateBackup, migrate, LEGACY_ID_MAP,
   currentProgram, rosterFor, startSession, finishSession, nextDay,
+  resolveSession, afterSignIn, showGate, hideGate, applyPermissions, tabAllowed,
+  pushToServer, get AUTH_MODE() { return AUTH_MODE; }, setStorageScope,
   acceptDeload, dismissDeload, inDeload, applySessionPlan, buildProgram,
   openConcernFor, resolvePainConcern, syncPainConcerns,
   paused_variant: null
