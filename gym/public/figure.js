@@ -25,7 +25,8 @@ function solve(p){
   near.hand  = pt(near.elbow[0],near.elbow[1],p.armF,SEG.farm);
   near.ankle = pt(near.knee[0], near.knee[1], p.shin, SEG.shin);
   near.toe   = pt(near.ankle[0],near.ankle[1],p.foot, SEG.foot);
-  return { hip:[hx,hy], shoulder:[sx,sy], head:[nx,ny], near, far, bend:p.bend||0 };
+  return { hip:[hx,hy], shoulder:[sx,sy], head:[nx,ny], near, far, bend:p.bend||0,
+           prop:p.prop||null, bench:p.bench||null, anchor:p.anchor||null };
 }
 
 /* --- auto-fit: ground the figure on the floor and centre it in the frame ---
@@ -47,7 +48,8 @@ function contactPts(S,spec){
 }
 function makeFit(stretch, view){
   const A=solve(stretch.a), B=solve(stretch.b);
-  const all=[...joints(A),...joints(B)];
+  const extra=S=>[...(S.bench||[]),...(S.anchor?[S.anchor]:[])];
+  const all=[...joints(A),...joints(B),...extra(A),...extra(B)];
   const pad=SEG.head+4;
   const xs=all.map(p=>p[0]), ys=all.map(p=>p[1]);
   const minX=Math.min(...xs)-pad, maxX=Math.max(...xs)+pad;
@@ -60,6 +62,7 @@ function makeFit(stretch, view){
 function applyFit(S,f){
   const T=p=>[p[0]*f.s+f.tx, p[1]*f.s+f.ty];
   return { hip:T(S.hip), shoulder:T(S.shoulder), head:T(S.head), bend:S.bend*f.s, scale:f.s,
+    prop:S.prop, bench:S.bench?S.bench.map(T):null, anchor:S.anchor?T(S.anchor):null,
     near:{elbow:T(S.near.elbow),hand:T(S.near.hand),knee:T(S.near.knee),ankle:T(S.near.ankle),toe:T(S.near.toe)},
     far:{elbow:T(S.far.elbow),hand:T(S.far.hand),knee:T(S.far.knee),ankle:T(S.far.ankle),toe:T(S.far.toe)} };
 }
@@ -109,27 +112,76 @@ function draw(svg, S, opts={}){
   // near limbs
   line(S.shoulder,S.near.elbow,near,lw); line(S.near.elbow,S.near.hand,near,lw);
   line(S.hip,S.near.knee,near,lw); line(S.near.knee,S.near.ankle,near,lw); line(S.near.ankle,S.near.toe,near,lw-2);
+
+  // equipment, drawn last so it sits in the hands
+  const sc=S.scale||1, kit=opts.kit||body;
+  const circle=(p,r,fill,stroke)=>{
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('cx',p[0].toFixed(1)); c.setAttribute('cy',p[1].toFixed(1));
+    c.setAttribute('r',r.toFixed(1));
+    c.setAttribute('fill',fill||'none'); if(stroke){c.setAttribute('stroke',stroke);c.setAttribute('stroke-width',2*sc);}
+    svg.appendChild(c);
+  };
+  if(S.bench) line(S.bench[0],S.bench[1],farC,lw+3);   // bench or box under the body
+  if(S.anchor){           // cable or band running to a fixed point
+    const l=document.createElementNS(NS,'line');
+    l.setAttribute('x1',S.anchor[0].toFixed(1)); l.setAttribute('y1',S.anchor[1].toFixed(1));
+    l.setAttribute('x2',S.near.hand[0].toFixed(1)); l.setAttribute('y2',S.near.hand[1].toFixed(1));
+    l.setAttribute('stroke',farC); l.setAttribute('stroke-width',(2*sc).toFixed(1));
+    l.setAttribute('stroke-dasharray',(4*sc).toFixed(1)+' '+(3*sc).toFixed(1));
+    svg.appendChild(l);
+    circle(S.anchor,3*sc,farC);
+  }
+  if(S.prop==='bar'){     // barbell seen end-on: a plate at the hand
+    circle(S.near.hand,9*sc,kit); circle(S.near.hand,4.5*sc,'#0A0B0A');
+  } else if(S.prop==='barback'){   // bar racked on the traps
+    circle(S.shoulder,9*sc,kit); circle(S.shoulder,4.5*sc,'#0A0B0A');
+  } else if(S.prop==='db'){
+    circle(S.near.hand,5.5*sc,kit); circle(S.far.hand,4.5*sc,farC);
+  } else if(S.prop==='db2'){
+    circle(S.near.hand,5.5*sc,kit); circle(S.far.hand,5.5*sc,kit);
+  }
 }
 
 /* Animate one stretch into one <svg>. Returns a stop() handle. */
+/* ---- one ticker drives every figure on screen ----
+   Ten animated thumbnails on a training day would otherwise be ten rAF loops.
+   Figures off screen or on a hidden tab are skipped entirely.              */
+const TICKER={items:new Set(), raf:null, fps:30, last:0, io:null};
+
+function ensureIO(){
+  if(TICKER.io || typeof IntersectionObserver==='undefined') return;
+  TICKER.io=new IntersectionObserver(es=>{
+    es.forEach(e=>{ const it=e.target.__fig; if(it) it.onScreen=e.isIntersecting; });
+  },{rootMargin:'80px'});
+}
+function tick(ts){
+  TICKER.raf=requestAnimationFrame(tick);
+  if(ts-TICKER.last < 1000/TICKER.fps) return;
+  TICKER.last=ts;
+  if(document.hidden) return;
+  TICKER.items.forEach(it=>{
+    if(it.paused || it.onScreen===false) return;
+    const period=it.stretch.ms||2600;
+    const u=((ts-it.t0)%period)/period;
+    const tri=u<0.5?u*2:(1-u)*2;                        // out and back
+    const e=tri<0.5?2*tri*tri:1-Math.pow(-2*tri+2,2)/2; // ease in/out
+    draw(it.svg, applyFit(solve(blend(it.stretch.a,it.stretch.b,e)),it.fit), it.opts);
+  });
+}
 function animate(svg, stretch, opts={}){
   const view=opts.view||{w:150,h:104,cx:100,floor:112,maxScale:1.15};
   const fit=makeFit(stretch,view);
-  const A=stretch.a, B=stretch.b, period=(stretch.ms||2600);
-  let raf=null, t0=null, stopped=false;
-  function frame(ts){
-    if(stopped) return;
-    if(t0===null) t0=ts;
-    const u=((ts-t0)%period)/period;
-    const tri=u<0.5?u*2:(1-u)*2;                       // out and back
-    const e=tri<0.5?2*tri*tri:1-Math.pow(-2*tri+2,2)/2; // ease in/out
-    draw(svg, applyFit(solve(blend(A,B,e)),fit), opts);
-    raf=requestAnimationFrame(frame);
-  }
-  // static first frame so a collapsed card still shows the pose
-  draw(svg, applyFit(solve(A),fit), opts);
-  if(!opts.still) raf=requestAnimationFrame(frame);
-  return ()=>{ stopped=true; if(raf) cancelAnimationFrame(raf); };
+  const it={svg,stretch,fit,opts,t0:performance.now(),paused:!!opts.still,onScreen:undefined};
+  draw(svg, applyFit(solve(stretch.a),fit), opts);   // static first frame
+  TICKER.items.add(it);
+  svg.__fig=it; ensureIO(); if(TICKER.io) TICKER.io.observe(svg);
+  if(!TICKER.raf) TICKER.raf=requestAnimationFrame(tick);
+  return ()=>{
+    TICKER.items.delete(it);
+    if(TICKER.io){ try{TICKER.io.unobserve(svg)}catch(e){} }
+    if(!TICKER.items.size && TICKER.raf){ cancelAnimationFrame(TICKER.raf); TICKER.raf=null; }
+  };
 }
 
 if(typeof module!=='undefined') module.exports={SEG,solve,blend,draw,animate,makeFit,applyFit,joints};

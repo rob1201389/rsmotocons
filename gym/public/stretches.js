@@ -149,3 +149,5 @@ const STRETCHES = [
 ];
 
 if(typeof module!=='undefined') module.exports={STRETCHES};
+
+if (typeof window !== 'undefined') window.STRETCHES = STRETCHES;

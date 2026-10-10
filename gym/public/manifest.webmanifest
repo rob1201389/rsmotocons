@@ -1,7 +1,7 @@
 {
-  "name": "Recomp \u2014 13 week build",
+  "name": "Recomp \u2014 adaptive strength training",
   "short_name": "Recomp",
-  "description": "13-week body recomposition trainer with automatic week-by-week progression, core work and nutrition targets.",
+  "description": "Adaptive strength training that explains every change it makes. Works offline.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
