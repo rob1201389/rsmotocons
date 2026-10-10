@@ -284,7 +284,18 @@ function resolveSettings(state, ex) {
     repStep: unitStep,        // how much a per-set target moves between sessions
     qualEpoch: null, changedAt: null
   };
-  const s = Object.assign({}, d, stored || {});
+  /* The plan may set sets and the rep range per exercise (state.planOverrides).
+     Settings the user has set themselves win; only fields they actually changed
+     are pinned, so a plan change still reaches everything they left alone. */
+  const pov = (state && state.planOverrides && state.planOverrides[ex.id]) || null;
+  const planned = {};
+  if (pov) ['sets', 'repMin', 'repMax', 'startLoad', 'since'].forEach(k => { if (pov[k] != null) planned[k] = pov[k]; });
+  let userPart = stored ? Object.assign({}, stored) : {};
+  if (stored && Array.isArray(stored.pinned)) {
+    ['sets', 'repMin', 'repMax'].forEach(k => { if (stored.pinned.indexOf(k) < 0) delete userPart[k]; });
+  }
+  const s = Object.assign({}, d, planned, userPart);
+  s.fromPlan = !!pov;
   s.increments = cleanIncrements(s.increments, baseInc);
   s.maxEffortV = (EFFORT_SCALE[s.maxEffort] || EFFORT_SCALE[TUNING.maxEffortDefault]).v;
   if (!PROGRESSION_METHODS[s.method]) s.method = d.method;
@@ -359,8 +370,9 @@ function saveExerciseSettings(state, ex, incoming, dateISO) {
   const changedQual = QUALIFYING_FIELDS.some(k => JSON.stringify(before[k]) !== JSON.stringify(settings[k]));
   state.exerciseSettings = state.exerciseSettings || {};
   const prev = state.exerciseSettings[ex.id] || {};
+  const pinned = ['sets', 'repMin', 'repMax'].filter(k => settings[k] !== before[k] || (Array.isArray(prev.pinned) && prev.pinned.indexOf(k) >= 0));
   state.exerciseSettings[ex.id] = Object.assign({}, settings, {
-    qualEpoch: changedQual ? (dateISO || null) : (prev.qualEpoch || null),
+    pinned, qualEpoch: changedQual ? (dateISO || null) : (prev.qualEpoch || null),
     changedAt: Date.now()
   });
   return { ok: true, settings: resolveSettings(state, ex), restartedQualifying: changedQual };
@@ -422,7 +434,9 @@ function evaluateEntry(entry, settings, ex) {
   const atLoad = baseline == null ? [] : done.filter(s => _atLeastAsHard(s.actualWeight, baseline, assisted));
   const atLoadReps = atLoad.map(s => s.actualReps);
   const exactReps = baseline == null ? [] : done.filter(s => Math.abs(s.actualWeight - baseline) < 1e-9).map(s => s.actualReps);
-  const need = settings.sets;
+  const recordedSets = entry.decision && entry.decision.prescription && Number.isFinite(entry.decision.prescription.sets)
+    ? entry.decision.prescription.sets : null;
+  const need = recordedSets != null ? recordedSets : settings.sets;      // judged against what that session asked for
   const topCount = atLoadReps.filter(r => r >= settings.repMax).length;
   const setsOk = atLoad.length >= need;
   const repsOk = topCount >= need;
@@ -589,6 +603,7 @@ function buildSetTargets(prevReps, n, repMin, repMax, mode, step) {
 function decideCore(ctx) {
   const { state } = ctx;
   const settings = resolveSettings(state, ctx.ex);
+  if (ctx.settingsOverride) Object.assign(settings, ctx.settingsOverride);   // e.g. a shortened session today
   const ex = effectiveEx(ctx.ex, settings);          // sets and rep range come from the settings
   const isDouble = settings.method === 'double';
   const today = ctx.todayISO;
@@ -699,6 +714,22 @@ function decideCore(ctx) {
   const base = evd ? evd.baseline : baselineFrom(last, ex, inc);
   const gap = daysSince(last.date, today);
   push('history', `Last done ${gap} day(s) ago at ${fmtLoad(base, ex)}`);
+
+  /* ---------- 1a. A GOAL CHANGE moved the rep range. History is kept, but the load
+        for the new range is re-estimated once, rather than carried over blindly. */
+  if (settings.startLoad != null && settings.since && last.date < settings.since && !settings.__rebased) {
+    push('rebase', `Rep range changed; starting at ${settings.startLoad} kg`);
+    return finish({
+      action: 'hold',
+      prescription: buildPrescription(ex, settings.startLoad, targetReps(ex, 'range'), ex.sets, mod),
+      explain: {
+        what: `Starting ${fmtLoad(settings.startLoad, ex)} for the new ${settings.repMin}–${settings.repMax} range.`,
+        why: `Your plan changed the rep range, so the load from the old range (${fmtLoad(base, ex)}) is not the right place to start. This is estimated from your recent best on this exercise, then the normal progression rules take over.`,
+        next: `Work to ${settings.repMax} ${mod.unit} on every set with the effort and technique you set, and the load moves up from here.`
+      },
+      flags: ['rebase'], trace, ready, confidence: 'medium'
+    });
+  }
 
   /* ---------- 1b. MANUAL: the app never moves the load. */
   if (settings.method === 'manual') return finish(manualDecision(ex, base, last, settings, gap, trace, ready, mod));
@@ -980,6 +1011,21 @@ function decideCore(ctx) {
         next: `Repeat ${fmtLoad(base, ex)}. ${settings.minReserve} or more in reserve and it moves up.`
       },
       flags: [], trace, ready, confidence: 'high'
+    });
+  }
+
+  // 8e'. The plan is holding loads (reduced-demand or low-energy day): nothing goes up.
+  if (ctx.holdLoad) {
+    push('plan.hold', 'The plan is holding loads for this session');
+    return finish({
+      action: 'hold',
+      prescription: buildPrescription(ex, base, targetReps(ex, 'high'), ex.sets, mod),
+      explain: {
+        what: `Holding ${fmtLoad(base, ex)} today.`,
+        why: 'Your plan is holding loads for this session because the workload is being reduced. An increase that was earned is not lost: it is simply not added on a lighter day.',
+        next: 'Normal progression resumes in the next session without this hold.'
+      },
+      flags: ['plan_hold'], trace, ready, confidence: 'high'
     });
   }
 
@@ -1317,7 +1363,7 @@ function buildProgressionInfo(ctx, d, settings, ex, evd) {
   else if (f.includes('increment_blocked')) info.status = 'blocked';
   else if (f.includes('building_reps')) info.status = 'building';
   else info.status = 'held';
-  const hb = ['needed_less','maximal_effort','unknown_feedback','low_readiness','high_workload','technique','qualifying_wait','post_deload','pain']
+  const hb = ['needed_less','maximal_effort','unknown_feedback','low_readiness','high_workload','technique','qualifying_wait','post_deload','pain','plan_hold','rebase']
     .find(x => f.includes(x));
   info.heldBy = hb || null;
 

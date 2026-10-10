@@ -16,3 +16,8 @@ database_id = "replace-with-your-d1-id"
 # Secrets are NOT set here. Use:
 #   wrangler secret put OWNER_EMAIL
 #   wrangler secret put BOOTSTRAP_OWNER_PASSWORD
+#
+# Optional, for sign-up email and the AI weekly review (none are set by default):
+#   wrangler secret put RESEND_API_KEY
+#   wrangler secret put ANTHROPIC_API_KEY
+# Plain variables such as MAIL_FROM, PUBLIC_URL and AI_MODEL may go under [vars].

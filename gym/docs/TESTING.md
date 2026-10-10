@@ -159,3 +159,27 @@ Listed in the app under Profile → Coaching assumptions, and in `engine.js` as
   and has no validation. Pain is deliberately excluded from it.
 
 This app does not diagnose injuries and does not prescribe rehabilitation.
+
+## Coaching, review, library, wearable import and backend (added with the coaching work)
+
+Run all of it with `gym/test/run-all.sh` (needs `npm install` in `gym/test` for jsdom; Node 22 for the backend's `node:sqlite`).
+
+| Suite | What it proves |
+|---|---|
+| `test/plan.test.js` | The nine required scenarios against the engines: consistent progress; reps up at the same weight; low energy plus underperformance reduces demand; a busy week gets shorter sessions; an extra workout is counted and the week adjusted; missed sessions rescheduled without cramming; pain on its own pathway; goal and equipment change with history kept; missing check-in and stale wearable data without unsupported conclusions. Also: partial and additional counting, planned completion capped at 100 per cent, written updates (edit, delete, drafts, stale-draft detection, suggestions need confirmation, note text is data), AI payload and number guard, outage and timeout fallback. |
+| `test/coaching.ui.test.js` | The real screens in jsdom with a fixed clock: navigation, planned Today, daily adaptation preview then saved change, live session keeps logged sets, start and finish a planned slot, the full weekly review (numbers, conversation, report, accept), training update drafts, My plan editing with a saved new version, first-time setup mid-week, extra workout end to end, pain and no-check-in reports, workouts, stretch and recovery. |
+| `test/garmin.test.js` | CSV, TCX and sleep JSON parsing, FIT refused, duplicates, strength rows excluded by default, staleness. |
+| `test/library.test.js` | Library content integrity and that library exercises never enter the generated programme. |
+| `backend/test/*.test.js` | Sign-up, verification, pending access, rejection, approval, suspended accounts denied on direct requests, forgot and reset, rate limits, AI endpoint validation, weekly submissions. |
+| `test/auth.ui.test.js` | The authentication dialog: no private content before sign-in, tabs, focus, keyboard, validation, pending page, admin approval screen. |
+
+`node test/example-reports.js` regenerates `EXAMPLE-REPORTS.md` (demonstration data, labelled as such).
+`node test/screens.cjs <playwright path> <outdir>` regenerates the screenshots in `docs/screens/coaching`.
+
+### Not verified
+
+- No screen reader (VoiceOver, TalkBack) was run against the new screens, and contrast was not measured.
+- Nothing was run against a real Resend, Anthropic, Cloudflare Workers or D1. Email and AI are covered with fakes.
+- The Garmin importer was tested on small hand-written samples shaped like the exports, not on real exports from a device.
+- The workout and stretch library is written from general practice and has not been reviewed by a coach or physiotherapist. Diagrams are simplified stick figures.
+- Push notifications do not exist. The review reminder is an in-app card.

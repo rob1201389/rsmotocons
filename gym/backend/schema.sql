@@ -3,11 +3,11 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
   id              TEXT PRIMARY KEY,
-  email           TEXT NOT NULL UNIQUE,     -- login identifier only; no mail is sent
+  email           TEXT NOT NULL UNIQUE,     -- login identifier (an email address for self sign-up)
   name            TEXT,
   password_hash   TEXT NOT NULL,
   role            TEXT NOT NULL DEFAULT 'member',  -- owner | admin | coach | member
-  status          TEXT NOT NULL DEFAULT 'pending', -- pending | active | suspended | revoked
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | active | suspended | revoked | rejected
   must_change_pw  INTEGER NOT NULL DEFAULT 0,
   mfa_secret      TEXT,
   permissions     TEXT,                     -- JSON object of per-feature overrides
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS review_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msgs_review ON review_messages(review_id);
 
--- A reviewer proposes a change; it only takes effect if the user accepts.
+-- A reviewer proposes a change, which only takes effect if the user accepts.
 CREATE TABLE IF NOT EXISTS plan_proposals (
   id          TEXT PRIMARY KEY,
   review_id   TEXT REFERENCES reviews(id) ON DELETE CASCADE,
@@ -118,3 +118,67 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Self sign-up. One row per request. status moves
+-- pending_verification -> pending_approval -> approved or rejected.
+CREATE TABLE IF NOT EXISTS signup_requests (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  name              TEXT,
+  email             TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending_verification',
+  email_verified_at INTEGER,
+  verified_by_admin INTEGER NOT NULL DEFAULT 0,
+  created_at        INTEGER NOT NULL,
+  decided_at        INTEGER,
+  decided_by        TEXT,
+  decision_note     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_signup_status ON signup_requests(status);
+
+-- One-time email tokens. Only the sha256 of the token is stored.
+CREATE TABLE IF NOT EXISTS email_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose    TEXT NOT NULL,                 -- verify | reset
+  expires_at INTEGER NOT NULL,
+  used_at    INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_tokens_user ON email_tokens(user_id, purpose);
+
+-- Private administrative notes. Never returned by any member-facing endpoint.
+CREATE TABLE IF NOT EXISTS admin_notes (
+  user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  note       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT
+);
+
+-- Generic sliding-window rate limiting (sign-up, resend, reset, AI review).
+CREATE TABLE IF NOT EXISTS rate_events (
+  id  INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL,
+  at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_key ON rate_events(key, at);
+CREATE INDEX IF NOT EXISTS idx_rate_at ON rate_events(at);
+
+-- A member's weekly report sent to their assigned coach for sign-off.
+CREATE TABLE IF NOT EXISTS weekly_submissions (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start      TEXT NOT NULL,
+  report_json     TEXT NOT NULL,
+  plan_version_id TEXT,
+  status          TEXT NOT NULL DEFAULT 'submitted', -- submitted | approved | changes_requested | withdrawn
+  coach_id        TEXT REFERENCES users(id),
+  coach_note      TEXT,
+  created_at      INTEGER NOT NULL,
+  decided_at      INTEGER,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_weekly_user ON weekly_submissions(user_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_weekly_coach ON weekly_submissions(coach_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_open ON weekly_submissions(user_id, week_start)
+  WHERE status IN ('submitted', 'changes_requested');

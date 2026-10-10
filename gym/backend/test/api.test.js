@@ -454,14 +454,18 @@ await t('reactivation restores access but not the old session', async () => {
   eq(r.status, 200);
 });
 
-await t('a pending account cannot reach protected data', async () => {
+// INTENTIONAL CHANGE: a pending account used to get 403 at login. It can now sign in
+// and receives a RESTRICTED session; every protected route still refuses it (see signup.test.js).
+await t('a pending account can sign in but cannot reach protected data', async () => {
   await owner.fetch('/api/admin/users', { method: 'POST',
     body: { email: 'pending@example.test', password: 'Pending-Passphrase-1', role: 'member', status: 'pending' } });
   const p = client();
   const r = await p.fetch('/api/auth/login', { method: 'POST',
     body: { email: 'pending@example.test', password: 'Pending-Passphrase-1' } });
-  eq(r.status, 403);
-  eq(r.data.accountStatus, 'pending');
+  eq(r.status, 200);
+  eq(r.data.user.accountState, 'pending_approval');
+  const s = await p.fetch('/api/state');
+  eq(s.status, 403); eq(s.data.code, 'pending');
 });
 
 await t('logout invalidates the session server-side', async () => {

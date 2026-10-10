@@ -372,7 +372,7 @@ const V1 = {
 t('v1 is detected and migrated', () => {
   eq(C.detectVersion(V1), 1);
   const r = C.migrate(V1, { dayOfExercise: X.dayOfExerciseMap(), exIndex: EXI, variantMap: X.LEGACY_ID_MAP });
-  ok(r.migrated); eq(r.state.schemaVersion, C.SCHEMA_VERSION); eq(C.SCHEMA_VERSION, 4);
+  ok(r.migrated); eq(r.state.schemaVersion, C.SCHEMA_VERSION); eq(C.SCHEMA_VERSION, 5);
 });
 
 t('week-keyed logs become dated sessions', () => {
@@ -421,7 +421,7 @@ t('settings carry into profile and nutrition', () => {
 
 t('an audit trail is written', () => {
   const r = C.migrate(V1, { dayOfExercise: X.dayOfExerciseMap(), exIndex: EXI, variantMap: X.LEGACY_ID_MAP });
-  eq(r.state.migrations.length, 2);                 // v1 -> v3, then v3 -> v4
+  eq(r.state.migrations.length, 3);                 // v1 -> v3, v3 -> v4, v4 -> v5
   eq(r.state.migrations[0].from, 1);
   eq(r.state.migrations[1].from, 3);
 });

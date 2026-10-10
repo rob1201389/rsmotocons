@@ -1,10 +1,10 @@
 /* ============================================================================
-   Recomp core — schema v4, migration, sessions, records, nutrition, backup.
+   Recomp core — schema v5, migration, sessions, records, nutrition, backup.
    Pure logic, no DOM. Loaded as a classic script in the browser and required
    by the node test suite.
    ========================================================================== */
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /* ---------------------------------------------------------------- defaults */
 const DEFAULT_INCREMENTS = {
@@ -62,6 +62,14 @@ function blankState() {
     prefs: { ...DEFAULT_PREFS },
     program: { startDate: todayISO(), weeks: 13 },
     exerciseSettings: {},  // per VARIANT progression settings (v4). Absent = defaults.
+    goals: null,           // goals, availability, preferences, milestones, review day (v5)
+    plan: null,            // versioned plan, weekly slots and change log (v5), see plan.js
+    planOverrides: {},     // derived from the plan version governing this week
+    notes: [], noteDrafts: {}, noteSuggestions: [], painReviews: [],   // written training updates (v5)
+    reviews: [],           // weekly review reports, drafts and final (v5)
+    wellness: { sleep: [], activities: [], imports: [] },              // imported wearable data (v5)
+    intake: {},            // { 'YYYY-MM-DD': { kcal, protein } } entered by the user (v5)
+    stretchLog: [],        // completed stretch and recovery sessions (v5)
     sessions: [],          // stable-id, dated session records
     bodyweight: [],        // [{date:'YYYY-MM-DD', kg}]
     bests: {},             // derived; always recomputed, never incremented in place
@@ -560,11 +568,31 @@ function migrateV3toV4(raw) {
   return st;
 }
 
+/* v4 -> v5. Additive again: goals, plan, notes, reviews, wellness, intake and the
+   stretch log are created empty. The plan is built on first use from the existing
+   profile, so nothing about past sessions, settings or records changes. */
+function migrateV4toV5(raw) {
+  const st = Object.assign(blankState(), raw, { schemaVersion: 5 });
+  st.profile = Object.assign({}, DEFAULT_PROFILE, raw.profile || {});
+  st.profile.increments = Object.assign({}, DEFAULT_INCREMENTS, (raw.profile || {}).increments || {});
+  st.nutrition = Object.assign({}, DEFAULT_NUTRITION, raw.nutrition || {});
+  st.prefs = Object.assign({}, DEFAULT_PREFS, raw.prefs || {});
+  st.exerciseSettings = Object.assign({}, raw.exerciseSettings || {});
+  ['notes', 'noteSuggestions', 'painReviews', 'reviews', 'stretchLog'].forEach(k => { st[k] = Array.isArray(raw[k]) ? raw[k] : []; });
+  st.noteDrafts = raw.noteDrafts || {}; st.planOverrides = raw.planOverrides || {}; st.intake = raw.intake || {};
+  st.wellness = Object.assign({ sleep: [], activities: [], imports: [] }, raw.wellness || {});
+  st.goals = raw.goals || null; st.plan = raw.plan || null;
+  st.migrations = (st.migrations || []).concat([{ from: 4, to: 5, at: Date.now(),
+    sessions: (st.sessions || []).length, note: 'goals, plan, weekly reviews, written updates, wellness imports added (empty); sessions, settings and records unchanged' }]);
+  return st;
+}
+
 function migrate(raw, opts) {
   opts = opts || {};
   const v = detectVersion(raw);
   if (v == null) return { state: blankState(), migrated: false, from: null };
-  if (v === 3) return { state: migrateV3toV4(raw), migrated: true, from: 3 };
+  if (v === 3) return { state: migrateV4toV5(migrateV3toV4(raw)), migrated: true, from: 3 };
+  if (v === 4) return { state: migrateV4toV5(raw), migrated: true, from: 4 };
   if (v === SCHEMA_VERSION) {
     const st = Object.assign(blankState(), raw);
     st.exerciseSettings = Object.assign({}, raw.exerciseSettings || {});
@@ -575,12 +603,12 @@ function migrate(raw, opts) {
     return { state: st, migrated: false, from: v };
   }
   if (v === 1) {
-    return { state: migrateV3toV4(migrateV1toV3(raw, opts.dayOfExercise, opts.exIndex, opts.variantMap)), migrated: true, from: 1 };
+    return { state: migrateV4toV5(migrateV3toV4(migrateV1toV3(raw, opts.dayOfExercise, opts.exIndex, opts.variantMap))), migrated: true, from: 1 };
   }
   if (v === 2) { // reserved: v2 never shipped publicly
     const st = Object.assign(blankState(), raw, { schemaVersion: 3 });
     st.migrations = (st.migrations || []).concat([{ from: 2, to: 3, at: Date.now() }]);
-    return { state: migrateV3toV4(st), migrated: true, from: 2 };
+    return { state: migrateV4toV5(migrateV3toV4(st)), migrated: true, from: 2 };
   }
   // Unknown FUTURE version: refuse rather than mangle it.
   return { state: null, migrated: false, from: v,
@@ -654,7 +682,7 @@ if (typeof module !== 'undefined' && module.exports) {
     e1rm, recomputeBests,
     logBodyweight, trailingAverage, weeklyRate, currentBodyweight,
     macroTargets, buildMealPlan, planTotals, FOOD,
-    detectVersion, migrate, migrateV1toV3, migrateV3toV4,
+    detectVersion, migrate, migrateV1toV3, migrateV3toV4, migrateV4toV5,
     makeBackup, validateBackup, checksum
   };
 }

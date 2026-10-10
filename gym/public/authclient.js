@@ -15,6 +15,7 @@ const AUTH = (function () {
 
   const OFFLINE_GRACE_MS = 72 * 3600 * 1000;   // 3 days of offline use, then revalidate
   let session = null;                           // { user } or null
+  let pendingUser = null;                       // signed in but awaiting verification or approval
   let lastVerifiedAt = 0;
   let offline = !navigator.onLine;
 
@@ -57,6 +58,8 @@ const AUTH = (function () {
     } catch (e) {}
   }
 
+  const isPendingUser = u => !!(u && u.accountState && u.accountState !== 'active');
+
   /* ---- session ---------------------------------------------------------- */
   async function refresh() {
     try {
@@ -70,7 +73,15 @@ const AUTH = (function () {
         session = null;
         return { state: 'no_backend' };
       }
+      if (r.status === 200 && r.data.authenticated && isPendingUser(r.data.user)) {
+        /* Signed in, but not approved (or not verified) yet. This is NOT a session
+           the app may use: nothing is cached for offline use and user() stays null. */
+        session = null;
+        pendingUser = r.data.user;
+        return { state: 'pending', user: r.data.user };
+      }
       if (r.status === 200 && r.data.authenticated) {
+        pendingUser = null;
         session = { user: r.data.user };
         lastVerifiedAt = Date.now();
         try { localStorage.setItem('recomp.lastVerified', String(lastVerifiedAt)); } catch (e) {}
@@ -125,6 +136,11 @@ const AUTH = (function () {
       wipeAccount(previous);
       await wipeCaches();
     }
+    if (isPendingUser(r.data.user)) {
+      session = null; pendingUser = r.data.user;
+      return { ok: true, user: r.data.user, pending: true };
+    }
+    pendingUser = null;
     session = { user: r.data.user };
     lastVerifiedAt = Date.now();
     try {
@@ -136,7 +152,8 @@ const AUTH = (function () {
   }
 
   async function logout() {
-    const uid = session && session.user ? session.user.id : localStorage.getItem('recomp.lastUser');
+    const uid = session && session.user ? session.user.id
+      : pendingUser ? pendingUser.id : localStorage.getItem('recomp.lastUser');
     try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
     if (uid) wipeAccount(uid);
     try {
@@ -144,7 +161,7 @@ const AUTH = (function () {
       localStorage.removeItem('recomp.lastUser');
     } catch (e) {}
     await wipeCaches();
-    session = null;
+    session = null; pendingUser = null;
     return { ok: true };
   }
 
@@ -161,6 +178,9 @@ const AUTH = (function () {
   /* ---- state sync -------------------------------------------------------- */
   async function pullState() {
     const r = await api('/api/state');
+    if (r.status === 403 && r.data.code === 'pending') {
+      return { ok: false, pending: true, accountState: r.data.accountState, error: r.data.error };
+    }
     if (r.status === 403) return { ok: false, forbidden: true, error: r.data.error };
     if (r.status !== 200) return { ok: false, error: r.data.error || 'Could not load your data.' };
     return { ok: true, doc: r.data.doc, version: r.data.version };
@@ -172,7 +192,71 @@ const AUTH = (function () {
     return { ok: true, version: r.data.version };
   }
 
+  /* ---- sign-up, verification, reset, account status ---------------------
+     Every method resolves to { ok, status, data, error, code } and never
+     throws for an HTTP error. A network failure still rejects, so the caller
+     can tell "the server said no" from "the server could not be reached". */
+  function shape(r, fallback) {
+    return { ok: r.ok, status: r.status, data: r.data,
+             error: r.ok ? null : (r.data.error || fallback), code: r.data.code || null };
+  }
+  async function signup(f) {
+    const r = await api('/api/auth/signup', { method: 'POST', body: {
+      name: f.name, email: f.email, password: f.password, website: f.website || '' } });
+    return shape(r, 'Could not create your account.');
+  }
+  async function verify(token) {
+    return shape(await api('/api/auth/verify', { method: 'POST', body: { token } }),
+      'This confirmation link is invalid or has expired.');
+  }
+  async function resendVerification() {
+    return shape(await api('/api/auth/resend-verification', { method: 'POST' }),
+      'Could not send another email.');
+  }
+  async function accountStatus() {
+    const r = await api('/api/auth/account-status');
+    const out = shape(r, 'Could not check your account.');
+    out.signedOut = r.status === 401;
+    out.accountStatus = r.data.accountStatus || null;
+    return out;
+  }
+  async function forgot(email) {
+    return shape(await api('/api/auth/forgot', { method: 'POST', body: { email } }),
+      'Could not send the reset email.');
+  }
+  async function reset(token, password) {
+    return shape(await api('/api/auth/reset', { method: 'POST', body: { token, password } }),
+      'Could not reset the password.');
+  }
+
+  /* ---- administrator: sign-up requests, decisions, private notes ---------- */
+  async function adminRequests(status) {
+    const q = status && status !== 'all' ? '?status=' + encodeURIComponent(status) : '?status=all';
+    return shape(await api('/api/admin/requests' + q), 'Could not load requests.');
+  }
+  async function adminDecision(requestId, body) {
+    return shape(await api('/api/admin/requests/' + encodeURIComponent(requestId) + '/decision',
+      { method: 'POST', body }), 'Could not save the decision.');
+  }
+  async function adminVerifyEmail(requestId) {
+    return shape(await api('/api/admin/requests/' + encodeURIComponent(requestId) + '/verify-email',
+      { method: 'POST', body: {} }), 'Could not verify the email address.');
+  }
+  async function adminNoteGet(userId) {
+    return shape(await api('/api/admin/users/' + encodeURIComponent(userId) + '/note'),
+      'Could not load the note.');
+  }
+  async function adminNotePut(userId, note) {
+    return shape(await api('/api/admin/users/' + encodeURIComponent(userId) + '/note',
+      { method: 'PUT', body: { note } }), 'Could not save the note.');
+  }
+  async function adminUpdateUser(userId, patch) {
+    return shape(await api('/api/admin/users/' + encodeURIComponent(userId),
+      { method: 'PATCH', body: patch }), 'Could not update the account.');
+  }
+
   function user() { return session ? session.user : null; }
+  function pending() { return pendingUser; }
   function isOffline() { return offline; }
   function can(feature) {
     const u = user();
@@ -184,7 +268,9 @@ const AUTH = (function () {
   }
 
   return { api, refresh, setup, login, logout, changePassword, pullState, pushState,
-           user, can, isOffline, localKey, wipeAccount, wipeAllAccounts, wipeCaches,
+           signup, verify, resendVerification, accountStatus, forgot, reset,
+           adminRequests, adminDecision, adminVerifyEmail, adminNoteGet, adminNotePut, adminUpdateUser,
+           user, pending, can, isOffline, localKey, wipeAccount, wipeAllAccounts, wipeCaches,
            OFFLINE_GRACE_MS };
 })();
 

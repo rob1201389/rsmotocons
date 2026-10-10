@@ -37,7 +37,7 @@ export async function createApp(opts = {}) {
           headers: req.headers,
           body: ['GET','HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
         });
-        const out = await handle(request, { db, env, ip: req.socket.remoteAddress });
+        const out = await handle(request, { db, env, ip: req.socket.remoteAddress, fetch: opts.fetch, aiTimeoutMs: opts.aiTimeoutMs });
         res.writeHead(out.status, Object.fromEntries(out.headers));
         res.end(Buffer.from(await out.arrayBuffer()));
         return;

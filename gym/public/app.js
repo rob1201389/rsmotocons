@@ -329,6 +329,35 @@ function startSession(day, checkin) {
   go('train');
   say(`${dayName(day)} started with ${sess.entries.length} exercises`);
 }
+/* Start the session a plan slot describes. The roster, set counts and any
+   agreed changes come from the saved plan; loads come from double progression. */
+function startSlot(slotId, checkin) {
+  const today = todayISO();
+  Plan.reconcile(S, today);
+  const b = Plan.buildSession(S, slotId, checkin, today);
+  if (!b.ok) { toast(b.problems[0] || 'That session could not be started', 'warn'); return null; }
+  const sess = b.session; sess.checkin = checkin || null;
+  closeDeloadIfDue(S, today);
+  S.sessions.push(sess);
+  live.session = sess; S._liveId = sess.id;
+  persist(); go('train');
+  say(`${sess.dayName || 'Workout'} started with ${sess.entries.length} exercises`);
+  return sess;
+}
+/* A session that is not in the plan: an optional extra, or a replacement for a planned one. */
+function startAdHoc(sess) {
+  S.sessions.push(sess); live.session = sess; S._liveId = sess.id;
+  persist(); go('train'); say(`${sess.dayName || 'Workout'} started`);
+  return sess;
+}
+function sessionRatio(sess) {
+  let planned = 0, done = 0;
+  (sess.entries || []).forEach(e => (e.sets || []).forEach(st => {
+    if (st.warmup || st.role === 'backoff') return;
+    planned++; if (st.status === 'confirmed' || st.status === 'edited') done++;
+  }));
+  return planned ? Math.min(1, done / planned) : 0;
+}
 /* Planned sets come from the prescription: each set gets ITS OWN target, and
    back-off sets (if configured) follow as a separate role. Nothing here is
    performance; every set stays pending until the user acts on it. */
@@ -359,10 +388,13 @@ function currentSession() {
 }
 function finishSession() {
   const sess = currentSession(); if (!sess) return;
-  const performed = sess.entries.reduce((a, e) => a + workingSets(e).length, 0);
+  if (window.MoveUI) MoveUI.finaliseBlocks(sess);
+  const performed = sess.entries.reduce((a, e) => a + workingSets(e).length, 0) + (sess.blocks || []).filter(b => b.done).length;
   if (!performed) { toast('Nothing logged — session discarded', 'warn'); abandonSession(true); return; }
   sess.status = 'completed'; sess.endedAt = Date.now();
   recomputeBests(S, EX_INDEX);
+  if (sess.slotId) Plan.completeSlot(S, sess.slotId, sess, sessionRatio(sess));
+  else if (sess.extra) Plan.registerExtra(S, { date: sess.date, workoutId: sess.workoutId || null, replacesSlotId: sess.replacesSlotId || null, sessionId: sess.id, impact: sess.extraImpact || null });
   live.session = null; delete S._liveId;
   closeDeloadIfDue(S, todayISO());
   persist();
@@ -387,10 +419,15 @@ function abandonSession(quiet) {
 }
 
 /* ============================================================== render === */
-const TITLES = { today:'Today', train:'Train', progress:'Progress', library:'Library', profile:'Profile' };
+const TITLES = { today:'Today', plan:'My plan', workouts:'Workouts', stretch:'Stretch', recovery:'Recovery', more:'More',
+                 train:'Workout', nutrition:'Nutrition', progress:'Progress', library:'Exercises', profile:'Profile' };
+const ALL_TABS = ['today','plan','workouts','stretch','recovery','more','train','nutrition','progress','library','profile'];
+/* Phone bottom bar shows five items; the rest sit under More. On wide screens
+   every section is in the side rail. A section highlights the item that owns it. */
+const NAV_OWNER = { train:'today', recovery:'more', nutrition:'more', progress:'more', library:'more', profile:'more' };
 let tab = 'today';
-const TAB_FEATURE = { today:'training', train:'training', progress:'progress',
-                      library:'library', profile:null };
+const TAB_FEATURE = { today:'training', plan:'training', workouts:'training', stretch:'training', recovery:'training', more:null,
+                      train:'training', nutrition:'nutrition', progress:'progress', library:'library', profile:null };
 function tabAllowed(t) {
   const f = TAB_FEATURE[t];
   if (!f) return true;
@@ -399,18 +436,13 @@ function tabAllowed(t) {
 }
 function applyPermissions() {
   if (!window.AUTH || !AUTH.user()) return;
-  ['today','train','progress','library','profile'].forEach(t => {
+  ALL_TABS.forEach(t => {
     const b = document.querySelector(`[data-tab="${t}"]`);
     if (b) b.hidden = !tabAllowed(t);
   });
-  const fuel = $('#fuelCard');
-  if (fuel) {
-    const ok = AUTH.can('nutrition');
-    const section = fuel.previousElementSibling;
-    fuel.hidden = !ok; if (section && section.tagName === 'H2') section.hidden = !ok;
-  }
+  if (window.Views) Views.afterPermissions();
   if (!tabAllowed(tab)) {
-    const first = ['today','train','progress','library','profile'].find(tabAllowed);
+    const first = ALL_TABS.find(tabAllowed);
     if (first) go(first);
   }
 }
@@ -418,10 +450,11 @@ function applyPermissions() {
 function go(t) {
   if (!tabAllowed(t)) { toast('That section is not enabled for your account', 'warn'); return; }
   tab = t;
-  ['today','train','progress','library','profile'].forEach(x => {
-    document.getElementById('p-' + x).hidden = x !== t;
+  const owner = NAV_OWNER[t] || t;
+  ALL_TABS.forEach(x => {
+    const panel = document.getElementById('p-' + x); if (panel) panel.hidden = x !== t;
     const b = document.querySelector(`[data-tab="${x}"]`);
-    b.setAttribute('aria-selected', String(x === t));
+    if (b) b.setAttribute('aria-selected', String(window.matchMedia && matchMedia('(min-width: 900px)').matches ? x === t : x === owner));
   });
   $('#screenTitle').textContent = TITLES[t];
   window.scrollTo(0, 0);
@@ -436,29 +469,63 @@ function renderAll() {
   $('#storeBadge').className = 'badge' + (storageLabel() === 'NOT SAVING' ? ' live' : '');
   if (tab === 'today') renderToday();
   if (tab === 'train') renderTrain();
+  if (tab === 'nutrition') renderFuel();
   if (tab === 'progress') renderProgress();
   if (tab === 'library') renderLibrary();
   if (tab === 'profile') renderProfile();
+  if (window.Views && tab !== 'today' && Views.has(tab)) Views.render(tab, document.getElementById('p-' + tab));
 }
 
 /* ------------------------------------------------------------- TODAY ---- */
 function renderToday() {
   const notices = $('#todayNotices'); notices.innerHTML = '';
   const sess = currentSession();
-  const day = sess ? sess.dayId : nextDay();
+  const today = todayISO();
+  const planned = Plan.hasPlan(S);
+  let slots = [], slot = null;
+  if (planned) { Plan.reconcile(S, today); slots = Plan.slotsOn(S, today); slot = slots.find(x => x.kind === 'training' && x.status === 'planned') || null; }
+  const day = sess ? sess.dayId : (slot ? 1 : nextDay());
   const d = new Date();
   $('#todayDate').textContent = d.toLocaleDateString('en-AU', { weekday:'long', day:'numeric', month:'long' });
-  $('#todayTitle').textContent = sess ? `${dayName(day)} in progress` : dayName(day);
-  $('#todaySub').textContent = sess
-    ? `${sess.entries.filter(e => workingSets(e).length).length} of ${sess.entries.length} exercises logged`
-    : dayFocus(day);
-  const btn = $('#startBtn');
-  btn.textContent = sess ? 'Resume workout' : 'Start workout';
-  btn.onclick = () => {
-    if (sess) { go('train'); return; }
-    openCheckin(day);            // tap 1 = Start, tap 2 = Start in the sheet
-  };
-  $('#readinessBtn').onclick = () => openCheckin(day, true);
+  const btn = $('#startBtn'), rb = $('#readinessBtn');
+  rb.hidden = false;
+  rb.onclick = () => openCheckin(day, true);
+  if (sess) {
+    $('#todayTitle').textContent = `${sess.dayName || dayName(day)} in progress`;
+    $('#todaySub').textContent = `${sess.entries.filter(e => workingSets(e).length).length} of ${sess.entries.length} exercises logged`;
+    btn.hidden = false; btn.textContent = 'Resume workout'; btn.onclick = () => go('train');
+  } else if (planned) {
+    const done = slots.find(x => x.kind === 'training' && (x.status === 'completed' || x.status === 'partial'));
+    const other = slots.find(x => x.kind !== 'training' && x.status !== 'skipped');
+    if (slot) {
+      const r = Plan.sessionRoster(S, slot);
+      $('#todayTitle').textContent = r.dayName;
+      $('#todaySub').textContent = `About ${Math.round(r.minutes)} minutes · ${r.items.length} exercises · ` + r.items.slice(0, 3).map(i => (EX_INDEX[i.id] || {}).short).filter(Boolean).join(', ');
+      btn.hidden = false; btn.textContent = 'Start workout'; btn.onclick = () => openCheckin(day, false, slot.id);
+    } else if (done) {
+      $('#todayTitle').textContent = done.status === 'completed' ? 'Training done for today' : 'Part of today\'s session done';
+      $('#todaySub').textContent = `${done.label} is logged. More is optional, and extra work is counted in this week's load.`;
+      btn.hidden = false; btn.textContent = 'See optional sessions'; btn.onclick = () => go('workouts');
+    } else if (other) {
+      const kindWord = { rest: 'Rest day', recovery: 'Recovery day', stretch: 'Stretch day', conditioning: 'Conditioning' }[other.kind] || other.label;
+      $('#todayTitle').textContent = other.kind === 'conditioning' ? other.label : kindWord;
+      $('#todaySub').textContent = other.kind === 'rest' ? 'Nothing planned. Rest is part of the plan, and a rest day kept is a success.'
+        : other.kind === 'recovery' ? 'Easy movement and mobility. Recovery days are what make the hard days work.'
+        : other.kind === 'stretch' ? `A stretch session, about ${other.minutes || 15} minutes.` : `About ${other.minutes || 30} minutes of conditioning.`;
+      btn.hidden = false;
+      btn.textContent = other.kind === 'conditioning' ? 'Choose a conditioning session' : other.kind === 'stretch' ? 'Open stretch routines' : 'Open recovery';
+      btn.onclick = () => go(other.kind === 'conditioning' ? 'workouts' : other.kind === 'stretch' ? 'stretch' : 'recovery');
+    } else {
+      $('#todayTitle').textContent = 'Nothing planned today';
+      $('#todaySub').textContent = 'See My plan for the week.';
+      btn.hidden = false; btn.textContent = 'Open my plan'; btn.onclick = () => go('plan');
+    }
+  } else {
+    $('#todayTitle').textContent = dayName(day);
+    $('#todaySub').textContent = dayFocus(day);
+    btn.hidden = false; btn.textContent = 'Start workout';
+    btn.onclick = () => openCheckin(day);            // tap 1 = Start, tap 2 = Start in the sheet
+  }
 
   const dl = proposeDeload(S, todayISO());
   if (dl && !S._deloadDismissed) {
@@ -482,9 +549,23 @@ function renderToday() {
     notices.appendChild(b);
   }
 
-  // week strip
+  // week strip: the planned week when there is a plan, otherwise Monday to Sunday
   const strip = $('#weekStrip'); strip.innerHTML = '';
-  const today = todayISO();
+  if (planned) {
+    const wk = Plan.ensureWeek(S, today);
+    const sym = { training: 'T', conditioning: 'C', stretch: 'S', recovery: 'R', rest: '–' };
+    wk.slots.forEach(sl => {
+      const dn = ['M','T','W','T','F','S','S'][Plan.isoDow(sl.date) - 1];
+      const fin = sl.status === 'completed' || sl.status === 'partial';
+      const cell = el('div', (fin ? 'done ' : '') + (sl.date === today ? 'today' : '') + (sl.status === 'missed' || sl.status === 'skipped' ? ' miss' : ''));
+      cell.innerHTML = `<span>${dn}</span><span>${sym[sl.kind] || '·'}</span>`;
+      cell.setAttribute('aria-label', `${sl.date}: ${sl.label}, ${sl.status}`);
+      strip.appendChild(cell);
+    });
+    const ts = wk.slots.filter(x => x.kind === 'training');
+    const doneN = ts.filter(x => x.status === 'completed').length, part = ts.filter(x => x.status === 'partial').length;
+    $('#weekSummary').textContent = `${doneN} of ${ts.length} planned sessions done this week${part ? `, ${part} partly` : ''}. T training, C conditioning, S stretch, R recovery.`;
+  } else {
   const monday = addDays(today, -((new Date().getDay() + 6) % 7));
   let doneCount = 0;
   for (let i = 0; i < 7; i++) {
@@ -497,9 +578,10 @@ function renderToday() {
     strip.appendChild(cell);
   }
   $('#weekSummary').textContent = `${doneCount} of ${S.profile.trainingDaysPerWeek} planned days done this week.`;
+  }
 
   $('#insight').innerHTML = buildInsight();
-  renderFuel();
+  if (window.Views) Views.render('today', $('#todayExtra'));
 }
 
 function buildInsight() {
@@ -588,7 +670,17 @@ function renderTrain() {
     notices.appendChild(b);
   });
 
+  if (sess.slotId && window.TodayUI) {
+    const f = Plan.findSlot(S, sess.slotId);
+    if (f && f.slot.status === 'planned') {
+      const ad = el('div', 'opts vwrap'); ad.setAttribute('aria-label', 'Change this session');
+      [['less_time', 'I have less time'], ['equipment', 'Equipment unavailable'], ['feel_different', 'I feel different today']].forEach(([k, l]) => {
+        const b = el('button', null, l); b.type = 'button'; b.onclick = () => TodayUI.adaptFlow(sess.slotId, k); ad.appendChild(b); });
+      list.appendChild(ad);
+    }
+  }
   sess.entries.forEach((entry, idx) => list.appendChild(exCard(sess, entry, idx)));
+  if (window.MoveUI) MoveUI.trainExtras(sess, list);
 }
 
 function exCard(sess, entry, idx) {
@@ -1122,8 +1214,8 @@ $('#painSave').onclick = () => {
 
 /* --------------------------------------------------------- CHECK-IN ----- */
 let ckCtx = null;
-function openCheckin(day, previewOnly) {
-  ckCtx = { day, previewOnly, draft: blankCheckin() };
+function openCheckin(day, previewOnly, slotId) {
+  ckCtx = { day, previewOnly, slotId: slotId || null, draft: blankCheckin() };
   const b = $('#ckBody'); b.innerHTML = '';
   b.appendChild(scaleGroup('Energy', 'energy', 'Flat', 'Fresh'));
   b.appendChild(scaleGroup('Sleep', 'sleep', 'Poor', 'Great'));
@@ -1179,9 +1271,20 @@ $('#ckSave').onclick = () => {
   const ck = ckCtx.draft; ck.at = Date.now();
   closeSheet('ckSheet');
   if (ckCtx.previewOnly) { S.lastCheckin = ck; persist(); toast('Check-in saved'); renderAll(); return; }
+  if (ckCtx.slotId) { beginSlot(ckCtx.slotId, ck); return; }
   startSession(ckCtx.day, ck);
 };
-$('#ckSkip').onclick = () => { closeSheet('ckSheet'); if (!ckCtx.previewOnly) startSession(ckCtx.day, null); };
+$('#ckSkip').onclick = () => { closeSheet('ckSheet'); if (!ckCtx.previewOnly) { if (ckCtx.slotId) beginSlot(ckCtx.slotId, null); else startSession(ckCtx.day, null); } };
+/* If less time was chosen, show exactly what would be cut and let the user confirm before starting. */
+function beginSlot(slotId, ck) {
+  const f = Plan.findSlot(S, slotId);
+  const roster = f ? Plan.sessionRoster(S, f.slot) : null;
+  if (ck && ck.timeAvailableMin && roster && ck.timeAvailableMin < roster.minutes - 3 && window.Views) {
+    Views.openAdjust(slotId, 'less_time', { minutes: ck.timeAvailableMin }, () => startSlot(slotId, ck), () => startSlot(slotId, ck));
+    return;
+  }
+  startSlot(slotId, ck);
+}
 
 /* ------------------------------------------------------- COMPLETION ----- */
 function showCompletion(sess) {
@@ -1213,6 +1316,11 @@ function showCompletion(sess) {
     <span class="eyebrow">Next session</span>
     ${rows.join('') || '<p class="muted">Nothing was logged.</p>'}
     <p class="dim" style="font-size:.8rem;margin-top:10px">Every line above comes from what you actually logged plus the feedback you gave. Change a set or the feedback and these change too.</p>`;
+  if (window.NotesUI) {
+    const nb = el('button', 'btn block', 'Add a training update'); nb.id = 'doneUpdateBtn'; nb.style.marginTop = '12px';
+    nb.onclick = () => { closeSheet('doneSheet'); NotesUI.compose({ key: 'session:' + sess.id, linked: { sessionId: sess.id, slotId: sess.slotId || null }, origin: 'workout' }); };
+    d.appendChild(nb);
+  }
   openSheet('doneSheet');
 }
 
@@ -1513,6 +1621,10 @@ function renderProfile() {
     S = blankState(); persist(); renderAll(); toast('Everything erased','warn'); } };
   dt.appendChild(reset);
 
+  /* Administration: shown to administrators only (the server enforces it too). */
+  { const old = document.getElementById('profAdmin'); if (old) old.remove();
+    if (window.Admin && window.AUTH && Admin.available(AUTH.user())) $('#profPrefs').after(Admin.profileBlock()); }
+
   const as = $('#profAssume');
   as.innerHTML = `<p class="muted" style="font-size:.86rem;margin:0 0 10px">
     The engine encodes judgement calls. These are the ones a qualified coach or clinician should review.
@@ -1635,85 +1747,18 @@ $('#bwSave').onclick = () => {
    ========================================================================== */
 let AUTH_MODE = 'local';     // local | server | offline
 
+/* The gate is a public welcome page plus the sign-in dialog and the
+   account-status page. All of it lives in authui.js (AuthUI); this file only
+   decides when to show it and what happens once someone is signed in. The
+   views are: login, signup, setup, password, pending, blocked, welcome. */
 function showGate(view, opts) {
   opts = opts || {};
-  const gate = $('#authGate');
-  gate.hidden = false;
-  document.body.classList.add('locked');
-  $('#loginForm').hidden = view !== 'login';
-  $('#pwForm').hidden = view !== 'password';
-  $('#setupForm').hidden = view !== 'setup';
-  $('#authBlocked').hidden = view !== 'blocked';
-  $('#authHeading').textContent =
-    view === 'password' ? 'New password' : view === 'blocked' ? 'No access'
-    : view === 'setup' ? 'Set up your account' : 'Sign in';
-  $('#authSub').textContent =
-    view === 'password' ? 'This replaces the temporary password you were given.'
-    : view === 'setup' ? 'First time only. Enter your login and choose your own password.'
-    : view === 'blocked' ? ''
-    : 'Your training data is private to your account.';
-  if (view === 'blocked') $('#authBlockedMsg').textContent = opts.message || '';
-  $('#authFoot').textContent = opts.foot || '';
-  const focus = gate.querySelector('form:not([hidden]) input, #authBackBtn');
-  if (focus) setTimeout(() => focus.focus(), 80);
+  if (window.AuthUI) AuthUI.show(view, opts);
 }
 function hideGate() {
-  $('#authGate').hidden = true;
-  document.body.classList.remove('locked');
+  if (window.AuthUI) AuthUI.hide();
 }
-
-$('#loginForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const btn = $('#loginBtn'), errEl = $('#loginError');
-  errEl.hidden = true; btn.disabled = true; btn.textContent = 'Signing in…';
-  try {
-    const r = await AUTH.login($('#loginEmail').value.trim(), $('#loginPassword').value);
-    if (!r.ok) {
-      errEl.textContent = r.error; errEl.hidden = false;
-      if (r.accountStatus && r.accountStatus !== 'active') {
-        showGate('blocked', { message: r.error });
-      }
-      return;
-    }
-    $('#loginPassword').value = '';
-    await afterSignIn(r.user);
-  } catch (e2) {
-    errEl.textContent = 'Could not reach the server. Check your connection.';
-    errEl.hidden = false;
-  } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
-});
-
-$('#setupForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const errEl = $('#setupError'); errEl.hidden = true;
-  const pw = $('#setupPw').value;
-  if (pw !== $('#setupConfirm').value) { errEl.textContent = 'The two passwords do not match.'; errEl.hidden = false; return; }
-  const btn = $('#setupBtn'); btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const r = await AUTH.setup($('#setupEmail').value.trim(), pw);
-    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
-    $('#setupPw').value = $('#setupConfirm').value = '';
-    await afterSignIn(r.user);
-  } catch (e2) {
-    errEl.textContent = 'Could not reach the server. Check your connection.'; errEl.hidden = false;
-  } finally { btn.disabled = false; btn.textContent = 'Create my account'; }
-});
-
-$('#pwForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const errEl = $('#pwError'); errEl.hidden = true;
-  const next = $('#pwNext').value, confirm2 = $('#pwConfirm').value;
-  if (next !== confirm2) { errEl.textContent = 'The two new passwords do not match.'; errEl.hidden = false; return; }
-  const btn = $('#pwBtn'); btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const r = await AUTH.changePassword($('#pwCurrent').value, next);
-    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
-    $('#pwCurrent').value = $('#pwNext').value = $('#pwConfirm').value = '';
-    await afterSignIn(AUTH.user());
-  } finally { btn.disabled = false; btn.textContent = 'Set password and continue'; }
-});
-
-$('#authBackBtn').addEventListener('click', () => showGate('login'));
+if (window.AuthUI) AuthUI.init({ signedIn: user => afterSignIn(user) });
 
 /* One initialisation path, shared by first boot and by signing in. Takes the
    server document when there is one, otherwise whatever is on this device. */
@@ -1742,13 +1787,17 @@ async function initialiseState(serverDoc) {
    offer to bring across anything that was stored locally before accounts. */
 async function afterSignIn(user) {
   if (user.mustChangePassword) { showGate('password'); return; }
+  /* Signed up but not verified or approved yet: the account-status page only.
+     The server refuses everything else for this account anyway. */
+  if (user.accountState && user.accountState !== 'active') { showGate('pending', { user }); return; }
   AUTH_MODE = 'server';
   setStorageScope(user.id);
 
   const legacy = await readLegacyLocal();
   const pulled = await AUTH.pullState();
+  if (pulled.pending) { showGate('pending', { user }); return; }
   if (pulled.forbidden) {
-    showGate('blocked', { message: pulled.error || 'Training data is not enabled for your account.' });
+    showGate('blocked', { message: pulled.error || 'Training data is not enabled for your account.', loggedIn: true });
     return;
   }
   if (pulled.ok) serverVersion = pulled.version || 0;
@@ -1827,10 +1876,22 @@ async function resolveSession() {
   if (!window.AUTH) return { mode: 'local' };
   let r;
   try { r = await AUTH.refresh(); } catch (e) { return { mode: 'local' }; }
+  /* /?verify=TOKEN and /?reset=TOKEN links from emails. The token is removed
+     from the address bar as soon as it is read. Only when a backend exists. */
+  let link = null;
+  if (window.AuthUI && r.state !== 'no_backend') { try { link = await AuthUI.consumeUrl(); } catch (e) {} }
+  if (r.state === 'pending') {
+    showGate('pending', { user: r.user, notice: link && link.kind === 'verify' && link.ok ? 'Your email address is confirmed. Thank you.' : '' });
+    return { mode: 'gate' };
+  }
   if (r.state === 'authenticated') {
     if (r.user.mustChangePassword) { showGate('password'); return { mode: 'gate' }; }
     setStorageScope(r.user.id);
     return { mode: 'server', user: r.user };
+  }
+  if (link && r.state === 'anonymous') {
+    if (link.kind === 'reset') { showGate('reset', { token: link.token }); return { mode: 'gate' }; }
+    if (link.kind === 'verify') { showGate('verified', link); return { mode: 'gate' }; }
   }
   if (r.state === 'offline') {
     setStorageScope(r.user.id);
@@ -1853,13 +1914,16 @@ window.addEventListener('online',  () => {
   if (AUTH_MODE !== 'local' && window.AUTH) {
     AUTH.refresh().then(r => {
       if (r.state === 'authenticated') { pushToServer(); updateSyncBadge(); }
-      else if (r.state === 'anonymous') { showGate('login', { foot: 'Your session ended. Sign in to keep syncing.' }); }
+      else if (r.state === 'anonymous') { showGate('login', { foot: 'Your session ended. Log in to keep syncing.' }); }
+      else if (r.state === 'pending') { showGate('pending', { user: r.user }); }
     });
   }
 });
 window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; });
 
 (async function boot() {
+  /* Every classic script (including the views) has run by DOMContentLoaded. */
+  if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
   await initStorage();
 
   /* Who is this? The answer decides which storage namespace to open. */
@@ -1870,7 +1934,8 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
   let serverDoc = null;
   if (AUTH_MODE === 'server') {
     const pulled = await AUTH.pullState();
-    if (pulled.forbidden) { showGate('blocked', { message: pulled.error }); return; }
+    if (pulled.pending) { showGate('pending', { user: sess.user }); return; }
+    if (pulled.forbidden) { showGate('blocked', { message: pulled.error, loggedIn: true }); return; }
     if (pulled.ok) { serverDoc = pulled.doc; serverVersion = pulled.version || 0; }
   }
   const res = await initialiseState(serverDoc);
@@ -1918,6 +1983,16 @@ window.addEventListener('offline', () => { $('#offlineBadge').hidden = false; })
   }
 })();
 
+/* What the section views (views-*.js) are allowed to use. They own their own markup and
+   rules; everything about state, saving and sessions stays here. */
+window.RecompHost = {
+  get S() { return S; }, set S(v) { S = v; },
+  persist, go, renderAll, toast, say, banner, openSheet, closeSheet, todayISO, esc, el, $, $$,
+  startSlot, startAdHoc, currentSession, finishSession, openCheckin, pushUndo, startTimer, endTimer, mkFig,
+  seedSets, decideForEx, get live() { return live; },
+  EX_INDEX, EXERCISES, STRETCHES: (typeof STRETCHES !== 'undefined' ? STRETCHES : []),
+  get AUTH_MODE() { return AUTH_MODE; }, get tab() { return tab; }
+};
 window.__recomp = {
   get S() { return S; }, set S(v) { S = v; },
   go, renderAll, startTimer, decideForEx, persist,

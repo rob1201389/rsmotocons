@@ -799,11 +799,11 @@ t('sessions, sets, feedback, decisions and profile come through unchanged', () =
   const v3 = JSON.parse(JSON.stringify(s));
   v3.schemaVersion = 3; delete v3.exerciseSettings;
   const r = C.migrate(v3);
-  ok(r.migrated); eq(r.from, 3); eq(r.state.schemaVersion, 4);
+  ok(r.migrated); eq(r.from, 3); eq(r.state.schemaVersion, 5);
   eq(JSON.stringify(r.state.sessions), JSON.stringify(v3.sessions), 'sessions must be byte-identical');
   eq(r.state.profile.increments.cable, 1.25); eq(r.state.profile.maxLoadJumpPct, 7);
   eq(r.state.exerciseSettings, {});
-  const m = r.state.migrations[r.state.migrations.length - 1];
+  const m = r.state.migrations.find(x => x.from === 3);
   eq([m.from, m.to, m.sessions], [3, 4, 3]);
   eq(m.sets, 9);
 });
@@ -826,8 +826,8 @@ t('a v1 backup migrates through v3 to v4 in one pass without losing sessions', (
     logs: { '1:bench': { sets: [{ weight: '60', reps: '8', done: true }], ts: Date.parse('2026-09-01T10:00:00Z') } },
     bests: {}, bw: [], lastBackup: null };
   const r = C.migrate(V1, { dayOfExercise: X.dayOfExerciseMap(), exIndex: EXI, variantMap: X.LEGACY_ID_MAP });
-  eq(r.state.schemaVersion, 4); eq(r.state.sessions.length, 1);
-  eq(r.state.migrations.map(m => m.from), [1, 3]);
+  eq(r.state.schemaVersion, 5); eq(r.state.sessions.length, 1);
+  eq(r.state.migrations.map(m => m.from), [1, 3, 4]);
 });
 t('a v4 backup round-trips through makeBackup and validateBackup with its settings', () => {
   const s = chain();

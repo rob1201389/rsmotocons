@@ -10,33 +10,40 @@
 import { newId, sha256hex } from './crypto.js';
 import { sessionFromRequest, login, changePassword, revokeAllSessions, revokeSession,
          sessionCookie, clearCookie, readCookie, audit, setupAvailable, claimOwner, normLogin } from './auth.js';
+import { json, err, readBody } from './http.js';
+import * as signup from './signup.js';
+import { weeklyReview } from './ai.js';
+import { createSubmission, listSubmissions, decideSubmission } from './weekly.js';
 import { can, isOwner, isAdmin, isReviewer, effectivePermissions, mayAccessUserData,
          FEATURES, ROLES } from './rbac.js';
 
-const json = (data, status, headers) => new Response(JSON.stringify(data), {
-  status: status || 200,
-  headers: Object.assign({ 'Content-Type': 'application/json',
-    'Cache-Control': 'no-store, private',       // never cache authenticated responses
-    'X-Content-Type-Options': 'nosniff' }, headers || {})
-});
-const err = (status, message, extra) => json(Object.assign({ error: message }, extra || {}), status);
-
-function publicUser(u) {
+function publicUser(u, accountState) {
   return { id: u.id, email: u.email, name: u.name, role: u.role, status: u.status,
+           accountState,
            mustChangePassword: !!u.must_change_pw,
            permissions: effectivePermissions(u),
            lastLoginAt: u.last_login_at || null, createdAt: u.created_at };
 }
-async function body(req) { try { return await req.json(); } catch (e) { return {}; } }
+const body = readBody;
+
+/* The only routes a pending (unverified or awaiting approval) account may use.
+   Everything else is refused by one guard in handle(), so a new route cannot
+   forget to check. */
+const PENDING_ALLOWED = new Set([
+  'GET /api/auth/session', 'GET /api/auth/me', 'POST /api/auth/logout', 'POST /api/auth/password',
+  'POST /api/auth/resend-verification', 'GET /api/auth/account-status'
+]);
 
 export async function handle(req, ctx) {
   const { db, env } = ctx;
   const now = ctx.now || Date.now();
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
-  const ip = req.headers.get('x-forwarded-for') || ctx.ip || null;
+  // On Workers the platform supplies the client address (trustIp), which a caller cannot forge.
+  const ip = (ctx.trustIp ? ctx.ip : (req.headers.get('x-forwarded-for') || ctx.ip)) || null;
   const ua = req.headers.get('user-agent') || '';
   const secure = url.protocol === 'https:';
+  const rc = { req, ctx, db, env, now, url, ip, ua, secure };
 
   if (!path.startsWith('/api/')) return err(404, 'Not found');
 
@@ -57,19 +64,24 @@ export async function handle(req, ctx) {
     const b = await body(req);
     const r = await login(db, b.email, b.password, ip, ua, now);
     if (!r.ok) return err(r.status, r.error, { accountStatus: r.accountStatus });
-    return json({ user: publicUser(r.user) }, 200, { 'Set-Cookie': sessionCookie(r.token, secure) });
+    return json({ user: publicUser(r.user, await signup.accountState(db, r.user)) }, 200,
+      { 'Set-Cookie': sessionCookie(r.token, secure) });
   }
+  if (path === '/api/auth/signup' && req.method === 'POST') return signup.signup(rc);
+  if (path === '/api/auth/verify' && req.method === 'POST') return signup.verify(rc);
+  if (path === '/api/auth/forgot' && req.method === 'POST') return signup.forgot(rc);
+  if (path === '/api/auth/reset' && req.method === 'POST') return signup.reset(rc);
   if (path === '/api/auth/session' && req.method === 'GET') {
     const { user, reason } = await sessionFromRequest(db, req, now);
     if (!user) return json({ authenticated: false, reason: reason || 'none',
       setupAvailable: await setupAvailable(db, env) }, 200);
-    return json({ authenticated: true, user: publicUser(user) });
+    return json({ authenticated: true, user: publicUser(user, await signup.accountState(db, user)) });
   }
   if (path === '/api/auth/setup' && req.method === 'POST') {
     const b = await body(req);
     const r = await claimOwner(db, env, b.email, b.password, ip, ua, now);
     if (!r.ok) return err(r.status, r.error);
-    return json({ user: publicUser(r.user) }, 200, { 'Set-Cookie': sessionCookie(r.token, secure) });
+    return json({ user: publicUser(r.user, 'active') }, 200, { 'Set-Cookie': sessionCookie(r.token, secure) });
   }
 
   /* ---- everything below requires a live session ------------------------- */
@@ -78,6 +90,12 @@ export async function handle(req, ctx) {
     const st = user0 ? user0.status : null;
     return json({ error: 'Not signed in.', reason, accountStatus: st }, 401,
       { 'Set-Cookie': clearCookie(secure) });
+  }
+
+  /* ---- central guard: a pending account is restricted to a short allowlist */
+  if (user.status === 'pending' && !PENDING_ALLOWED.has(req.method + ' ' + path)) {
+    return err(403, 'Your account is awaiting approval.',
+      { code: 'pending', accountState: await signup.accountState(db, user) });
   }
 
   if (path === '/api/auth/logout' && req.method === 'POST') {
@@ -93,7 +111,9 @@ export async function handle(req, ctx) {
     const token = await (await import('./auth.js')).createSession(db, user, ip, ua, now);
     return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, secure) });
   }
-  if (path === '/api/auth/me' && req.method === 'GET') return json({ user: publicUser(user) });
+  if (path === '/api/auth/me' && req.method === 'GET') return json({ user: publicUser(user, await signup.accountState(db, user)) });
+  if (path === '/api/auth/account-status' && req.method === 'GET') return signup.accountStatus(rc, user);
+  if (path === '/api/auth/resend-verification' && req.method === 'POST') return signup.resendVerification(rc, user);
 
   /* A forced password change blocks everything else. */
   if (user.must_change_pw) {
@@ -139,6 +159,13 @@ export async function handle(req, ctx) {
     return json({ doc: row ? JSON.parse(row.doc) : null, version: row ? row.version : 0,
                   scope: access.scope });
   }
+
+  /* ---- AI weekly review and weekly submissions to a coach ----------------- */
+  if (path === '/api/ai/weekly-review' && req.method === 'POST') return weeklyReview(rc, user);
+  if (path === '/api/weekly-submissions' && req.method === 'POST') return createSubmission(rc, user);
+  if (path === '/api/weekly-submissions' && req.method === 'GET') return listSubmissions(rc, user);
+  m = path.match(/^\/api\/weekly-submissions\/([^/]+)$/);
+  if (m && req.method === 'PATCH') return decideSubmission(rc, user, m[1]);
 
   /* ---- import local data into the signed-in account --------------------- */
   if (path === '/api/import/preview' && req.method === 'POST') {
@@ -298,6 +325,14 @@ export async function handle(req, ctx) {
   if (path.startsWith('/api/admin/')) {
     if (!isAdmin(user)) return err(403, 'Administrator access required.');
 
+    if (path === '/api/admin/requests' && req.method === 'GET') return signup.adminRequestsList(rc);
+    m = path.match(/^\/api\/admin\/requests\/([^/]+)\/(decision|verify-email)$/);
+    if (m && req.method === 'POST') {
+      return m[2] === 'decision' ? signup.adminDecision(rc, user, m[1]) : signup.adminVerifyEmail(rc, user, m[1]);
+    }
+    m = path.match(/^\/api\/admin\/users\/([^/]+)\/note$/);
+    if (m && (req.method === 'GET' || req.method === 'PUT')) return signup.adminNote(rc, user, m[1]);
+
     if (path === '/api/admin/users' && req.method === 'GET') {
       const rows = await db.all(
         `SELECT id,email,name,role,status,must_change_pw,permissions,created_at,approved_at,last_login_at
@@ -352,13 +387,21 @@ export async function handle(req, ctx) {
       }
 
       if (b.status !== undefined) {
-        if (!['pending','active','suspended','revoked'].includes(b.status)) return err(400, 'Unknown status.');
+        if (!['pending','active','suspended','revoked','rejected'].includes(b.status)) return err(400, 'Unknown status.');
         if (target.role === 'owner' && b.status !== 'active') {
           const owners = await db.all("SELECT id FROM users WHERE role = 'owner' AND status = 'active'");
           if (owners.length <= 1) return err(409, 'This is the last active owner.');
         }
         await db.run('UPDATE users SET status = ?, approved_at = COALESCE(approved_at, ?), approved_by = COALESCE(approved_by, ?) WHERE id = ?',
           b.status, b.status === 'active' ? now : null, b.status === 'active' ? user.id : null, targetId);
+        if (b.status === 'active') {
+          // Keep the sign-up queue consistent when an admin activates someone directly.
+          await db.run("UPDATE signup_requests SET status = 'approved', decided_at = ?, decided_by = ? WHERE user_id = ? AND status <> 'approved'",
+            now, user.id, targetId);
+        } else if (b.status === 'rejected') {
+          await db.run("UPDATE signup_requests SET status = 'rejected', decided_at = ?, decided_by = ? WHERE user_id = ? AND status <> 'rejected'",
+            now, user.id, targetId);
+        }
         if (b.status !== 'active') {
           // Suspension or revocation kills every live session immediately.
           await revokeAllSessions(db, targetId, now);

@@ -81,10 +81,10 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
   const A = () => w.__recomp;
 
   t('app boots with no script errors', () => { ok(A(), 'app namespace missing'); eq(errs, []); });
-  t('v1 localStorage data is found and migrated to v4', () => {
-    eq(A().S.schemaVersion, 4);
+  t('v1 localStorage data is found and migrated to the current schema', () => {
+    eq(A().S.schemaVersion, 5);
     eq(A().S.sessions.length, 2, 'two dated sessions rebuilt');
-    ok(A().S.migrations.length === 2, 'v1->v3 then v3->v4');
+    ok(A().S.migrations.length === 3, 'v1->v3, v3->v4, v4->v5');
   });
   t('migration banner is shown to the user', () => {
     ok(d.querySelector('#todayNotices .banner.ok'), 'no upgrade banner');
@@ -434,8 +434,8 @@ process.on('unhandledRejection', e => { console.log('UNHANDLED:', e && (e.stack|
 
   sec('ACCESSIBILITY & RESILIENCE');
   t('tabs use the tablist pattern with aria-selected', () => {
-    const tabs = [...d.querySelectorAll('[role="tab"]')];
-    eq(tabs.length, 5);
+    const tabs = [...d.querySelectorAll('nav.tabs [role="tab"]')];
+    eq(tabs.length, 10);                 // five on the phone bar plus the sections under More
     eq(tabs.filter(t => t.getAttribute('aria-selected') === 'true').length, 1);
   });
   t('sheets are dialogs with labels', () => {

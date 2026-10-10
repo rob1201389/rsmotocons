@@ -221,8 +221,8 @@ const text = el => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
     const v3 = stateWith([12, 12, 10]); v3.schemaVersion = 3; delete v3.exerciseSettings;
     const dom = boot(v3); await wait(1300);
     const A = dom.window.__recomp;
-    t('schema is 4 and the session survived', () => { eq(A.S.schemaVersion, 4); eq(A.S.sessions.length, 1); eq(A.S.exerciseSettings, {}); });
-    t('the audit entry says v3 to v4', () => { const m = A.S.migrations[A.S.migrations.length - 1]; eq([m.from, m.to, m.sessions], [3, 4, 1]); });
+    t('schema is current and the session survived', () => { eq(A.S.schemaVersion, 5); eq(A.S.sessions.length, 1); eq(A.S.exerciseSettings, {}); });
+    t('the audit entry says v3 to v4', () => { const m = A.S.migrations.find(x => x.from === 3); eq([m.from, m.to, m.sessions], [3, 4, 1]); });
   }
 
   console.log('\n' + '='.repeat(62));
