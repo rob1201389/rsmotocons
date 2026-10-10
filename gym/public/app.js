@@ -1861,14 +1861,16 @@ function updateAccountButton() {
   b.hidden = false;
   b.textContent = (u.name || u.email).split('@')[0];
   b.title = `${u.email} · ${u.role}`;
-  b.onclick = async () => {
+  b.onclick = () => { if (window.Views) Views.openAccount(u, signOut); else signOut(); };
+  async function signOut() {
     if (!confirm(`Signed in as ${u.email}.\n\nSign out? Anything not yet synced stays on this device until you sign back in.`)) return;
     await AUTH.logout();
     S = blankState(); S._exIndex = EX_INDEX;
     setStorageScope(null);
     AUTH_MODE = 'local';
     location.reload();
-  };
+  }
+  if (window.Views) Views.afterPermissions();
 }
 
 /* Decide how the app starts. */

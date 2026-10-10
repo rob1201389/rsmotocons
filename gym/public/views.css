@@ -51,3 +51,4 @@
 .vtag{font-family:var(--mono);font-size:.66rem;padding:2px 7px;border:1px solid var(--line-strong);border-radius:999px;color:var(--muted)}
 .vfilter{display:grid;gap:8px;grid-template-columns:1fr 1fr}
 @media(min-width:620px){.vfilter{grid-template-columns:repeat(4,1fr)}}
+.tabs .navadmin{border-top:1px solid var(--line);margin-top:8px}

@@ -149,8 +149,22 @@
     root.appendChild(c);
   }
 
+
+  /* Administrators see waiting sign-up requests on Today. Counts come from the server. */
+  function adminCard(root) {
+    if (!Views.isAdmin() || H().AUTH_MODE !== 'server') return;
+    const c = el('div', 'card'); c.id = 'adminTodayCard'; c.hidden = true; root.prepend(c);
+    Promise.all(['pending_approval', 'pending_verification'].map(st => AUTH.api('/api/admin/requests?status=' + st).catch(() => null))).then(rs => {
+      const [ap, ve] = rs.map(r => r && r.status === 200 && r.data.requests ? r.data.requests.length : 0);
+      if (!ap && !ve) return;
+      c.innerHTML = `<span class="eyebrow">Administration</span><p style="margin:6px 0 8px"><b>${plural(ap, 'request')} waiting for approval</b>${ve ? `, ${plural(ve, 'more')} waiting for email verification` : ''}.</p>`;
+      const b = el('button', 'btn primary', 'Review requests'); b.onclick = () => Admin.open(b); c.appendChild(b); c.hidden = false;
+    });
+  }
+
   Views.register('today', { render(root) {
     root.innerHTML = '';
+    adminCard(root);
     const S = H().S, today = H().todayISO();
     if (!Plan.hasPlan(S)) { noPlanCard(root); updatesCard(root); return; }
     const slots = Plan.slotsOn(S, today);

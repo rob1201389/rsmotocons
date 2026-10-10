@@ -20,7 +20,26 @@ const Views = (function () {
   function register(name, view) { reg[name] = view; }
   const has = name => !!reg[name];
   function render(name, root) { if (reg[name] && root) { try { reg[name].render(root); } catch (e) { console.error('view ' + name, e); root.innerHTML = '<div class="empty"><b>This section could not be shown</b>Your data is safe. Reload the app, and if it keeps happening export a backup from Profile.</div>'; } } }
-  function afterPermissions() { if (reg.more && H().tab === 'more') render('more', document.getElementById('p-more')); }
+  const isAdmin = () => !!(window.Admin && window.AUTH && AUTH.user && Admin.available(AUTH.user()));
+  /* Administrators get Administration in the side rail, at the top of More, and in the account menu. */
+  function afterPermissions() {
+    const rail = document.querySelector('nav.tabs .tabs-in');
+    let btn = document.getElementById('navAdmin');
+    if (isAdmin() && rail && !btn) {
+      btn = el('button', 'sec navadmin', '<span class="ic" aria-hidden="true">⚙</span>Administration'); btn.id = 'navAdmin'; btn.type = 'button';
+      btn.onclick = () => Admin.open(btn); rail.insertBefore(btn, rail.querySelector('.more'));
+    } else if (!isAdmin() && btn) btn.remove();
+    if (reg.more && H().tab === 'more') render('more', document.getElementById('p-more'));
+  }
+  function openAccount(u, signOut) {
+    sheet('Account', (b, close) => {
+      b.appendChild(el('p', null, `<b>${esc(u.name || u.email)}</b><br><span class="muted">${esc(u.email)} · ${esc(u.role)}</span>`));
+      if (isAdmin()) { const a = el('button', 'btn primary block', 'Administration: requests and users'); a.style.marginTop = '8px'; a.onclick = () => { closeSheet(); Admin.open(); }; b.appendChild(a); }
+      const st = el('button', 'btn block', 'Settings and profile'); st.style.marginTop = '8px'; st.onclick = () => { closeSheet(); H().go('profile'); }; b.appendChild(st);
+      const gl = el('button', 'btn block', 'Goals and plan settings'); gl.style.marginTop = '8px'; gl.onclick = () => { closeSheet(); if (window.PlanUI) PlanUI.openGoals(!Plan.hasPlan(H().S)); }; b.appendChild(gl);
+      const so = el('button', 'btn ghost block', 'Sign out'); so.style.marginTop = '8px'; so.onclick = () => { closeSheet(); signOut(); }; b.appendChild(so);
+    });
+  }
 
   /* ------------------------------------------------ one generic bottom sheet */
   let sheetEl = null, sheetCloseCb = null;
@@ -156,9 +175,17 @@ const Views = (function () {
       ['nutrition', 'Nutrition', 'Targets, meals and food log'],
       ['progress', 'Progress', 'Lifts, bodyweight and records'],
       ['library', 'Exercise library', 'Every exercise, with how to do it'],
-      ['profile', 'Profile', 'Settings, equipment, data and account']
+      ['profile', 'Settings and profile', 'Units, equipment, nutrition targets, appearance, backup and account']
     ];
     const list = el('div', 'stack');
+    if (isAdmin()) {
+      const ad = el('button', 'vlink'); ad.type = 'button'; ad.id = 'moreAdmin';
+      ad.innerHTML = '<b>Administration</b><span class="muted">Sign-up requests, users, roles and permissions</span><span class="chev" aria-hidden="true">›</span>';
+      ad.onclick = () => Admin.open(ad); list.appendChild(ad);
+    }
+    const gs = el('button', 'vlink'); gs.type = 'button';
+    gs.innerHTML = '<b>Goals and plan settings</b><span class="muted">Goal, days, session length, equipment, review day</span><span class="chev" aria-hidden="true">›</span>';
+    gs.onclick = () => { if (window.PlanUI) PlanUI.openGoals(!Plan.hasPlan(H().S)); }; list.appendChild(gs);
     items.forEach(([t, name, sub]) => {
       if (!H().S || (window.AUTH && AUTH.user && AUTH.user() && TAB_OK(t) === false)) return;
       const b = el('button', 'vlink'); b.type = 'button'; b.innerHTML = `<b>${esc(name)}</b><span class="muted">${esc(sub)}</span><span class="chev" aria-hidden="true">›</span>`;
@@ -171,6 +198,6 @@ const Views = (function () {
   function TAB_OK(t) { const map = { recovery: 'training', nutrition: 'nutrition', progress: 'progress', library: 'library', profile: null }; const f = map[t]; return !f || !window.AUTH || !AUTH.can || AUTH.can(f); }
 
   return { register, has, render, afterPermissions, sheet, closeSheet, confirmSheet, card, heading, chips, scale, labelled, field, select, progressBar,
-    openAdjust, esc, el, fmtDate, fmtLong, plural, exName, todayISO, DOW3, MON3 };
+    openAdjust, openAccount, isAdmin, esc, el, fmtDate, fmtLong, plural, exName, todayISO, DOW3, MON3 };
 })();
 window.Views = Views;

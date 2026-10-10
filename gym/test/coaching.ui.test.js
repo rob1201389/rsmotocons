@@ -30,7 +30,20 @@ const sheetText = d => text(d.querySelector('#vSheet.on'));
   });
   t('More lists Recovery, Nutrition, Progress, Exercises, Profile and reviews', () => {
     c.A.go('more'); const s = text(c.d.querySelector('#p-more'));
-    ['Recovery', 'Nutrition', 'Progress', 'Exercise library', 'Profile', 'Weekly reviews'].forEach(x => ok(s.includes(x), x));
+    ['Recovery', 'Nutrition', 'Progress', 'Exercise library', 'Settings and profile', 'Goals and plan settings', 'Weekly reviews'].forEach(x => ok(s.includes(x), x));
+  });
+  t('an owner gets Administration in the rail, at the top of More and in the account menu; a member does not', () => {
+    const w = c.w, AU = w.AUTH, real = AU.user;
+    eq(c.d.getElementById('navAdmin'), null);
+    AU.user = () => ({ id: 'u1', email: 'rsmotocons', name: 'RS Motocons', role: 'owner', accountState: 'active', permissions: {} });
+    w.Views.afterPermissions(); c.A.go('more');
+    ok(c.d.getElementById('navAdmin')); ok(c.d.getElementById('moreAdmin'));
+    w.Views.openAccount(AU.user(), () => {}); ok(text(c.d.querySelector('#vSheet.on')).includes('Administration'));
+    c.H.closeSheet('vSheet');
+    AU.user = () => ({ id: 'u2', email: 'm@x.au', role: 'member', accountState: 'active', permissions: {} });
+    w.Views.afterPermissions(); c.A.go('more');
+    eq(c.d.getElementById('navAdmin'), null); eq(c.d.getElementById('moreAdmin'), null);
+    AU.user = real; w.Views.afterPermissions();
   });
   t('every section opens without error', () => {
     ['today', 'plan', 'workouts', 'stretch', 'recovery', 'nutrition', 'progress', 'library', 'profile', 'more'].forEach(x => { c.A.go(x); ok(!c.d.getElementById('p-' + x).hidden, x); });
