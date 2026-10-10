@@ -1,11 +1,22 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // Recomp gym app at gym.rsmotocons.com. A separate worker from the main
-  // site so its headers (inline script, Google Fonts) never touch the site CSP.
+  // site so its headers (Google Fonts) never touch the site CSP.
+  // The same worker serves the app (static assets) and its accounts API
+  // (/api/*), so the session cookie stays same-origin.
   "name": "rsmotocons-gym",
+  "main": "backend/worker.js",
   "compatibility_date": "2026-01-01",
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "gym.rsmotocons.com", "custom_domain": true }],
-  "assets": { "directory": "./public" }
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // Only the API runs code; everything else is served as static files.
+    "run_worker_first": ["/api/*"]
+  },
+  // No database_id on purpose: wrangler creates the "recomp" database on the
+  // first deploy and reuses it afterwards. Needs D1 Edit on the API token.
+  "d1_databases": [{ "binding": "DB", "database_name": "recomp" }]
 }

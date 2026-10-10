@@ -57,6 +57,30 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # Idempotent (CREATE TABLE IF NOT EXISTS), so safe on every deploy.
+      - name: Gym app database tables
+        working-directory: gym
+        run: npx --yes wrangler@4 d1 execute DB --remote --file=backend/schema.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # The owner is created from these on the first sign-in page load, then
+      # the bootstrap disables itself. Skipped until both repo secrets exist.
+      - name: Gym app owner secrets
+        working-directory: gym
+        run: |
+          if [ -z "$GYM_OWNER_EMAIL" ] || [ -z "$GYM_OWNER_PASSWORD" ]; then
+            echo "GYM_OWNER_EMAIL / GYM_OWNER_PASSWORD not set; skipping."; exit 0
+          fi
+          printf '%s' "$GYM_OWNER_EMAIL" | npx --yes wrangler@4 secret put OWNER_EMAIL
+          printf '%s' "$GYM_OWNER_PASSWORD" | npx --yes wrangler@4 secret put BOOTSTRAP_OWNER_PASSWORD
+        env:
+          GYM_OWNER_EMAIL: ${{ secrets.GYM_OWNER_EMAIL }}
+          GYM_OWNER_PASSWORD: ${{ secrets.GYM_OWNER_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       # Worth knowing: `wrangler deploy` does not touch secrets. DATA_KEY,
       # SESSION_SECRET, DRIVER_PIN and ADMIN_PASSWORD keep their current
       # values, because they are set on the worker and not in wrangler.jsonc.
