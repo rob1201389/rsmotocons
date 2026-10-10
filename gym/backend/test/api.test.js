@@ -56,11 +56,59 @@ await t('the owner exists and must change the bootstrap password', async () => {
   eq(u.must_change_pw, 1, 'owner not forced to change the bootstrap password');
 });
 
-await t('bootstrap disables itself once it has run', async () => {
+await t('the public /api/bootstrap endpoint no longer exists', async () => {
   const r = await owner.fetch('/api/bootstrap', { method: 'POST' });
-  eq(r.status, 409);
-  ok(/already|owner/i.test(r.data.reason || r.data.error || ''), JSON.stringify(r.data));
+  ok(r.status === 401 || r.status === 404, `expected 401/404, got ${r.status}`);
 });
+
+sec('FIRST-RUN SETUP — the owner chooses their own password in the app');
+
+{
+  const app2 = await createApp({ env: { OWNER_EMAIL: 'me@example.test', OWNER_NAME: 'Me' } });
+  await new Promise(r => app2.server.listen(0, '127.0.0.1', r));
+  const B2 = `http://127.0.0.1:${app2.server.address().port}`;
+  let ck = null;
+  const call = async (path, body) => {
+    const res = await fetch(B2 + path, { method: body ? 'POST' : 'GET',
+      headers: Object.assign({ 'Content-Type': 'application/json', 'X-Recomp-Request': '1' }, ck ? { Cookie: ck } : {}),
+      body: body ? JSON.stringify(body) : undefined });
+    const sc = res.headers.get('set-cookie'); if (sc) ck = sc.split(';')[0];
+    let data = null; try { data = await res.json(); } catch (e) {}
+    return { status: res.status, data };
+  };
+  const GOOD = 'Chosen-Passphrase-42';
+
+  await t('setup is offered while no owner exists', async () => {
+    const r = await call('/api/auth/session');
+    eq(r.data.authenticated, false); eq(r.data.setupAvailable, true);
+  });
+  await t('setup refuses any email other than the owner email', async () => {
+    const r = await call('/api/auth/setup', { email: 'someone@else.test', password: GOOD });
+    eq(r.status, 403);
+    eq(app2.db.get("SELECT COUNT(*) AS n FROM users").n, 0);
+  });
+  await t('setup refuses a weak password and explains why', async () => {
+    const r = await call('/api/auth/setup', { email: 'me@example.test', password: 'short' });
+    eq(r.status, 400); ok(/at least 12/.test(r.data.error), r.data.error);
+  });
+  await t('setup creates the owner, signs them in, and needs no forced change', async () => {
+    const r = await call('/api/auth/setup', { email: 'ME@example.test', password: GOOD });
+    eq(r.status, 200); eq(r.data.user.role, 'owner'); eq(r.data.user.mustChangePassword, false);
+    const me = await call('/api/auth/me'); eq(me.status, 200);
+  });
+  await t('setup closes for good once an owner exists', async () => {
+    const r = await call('/api/auth/setup', { email: 'me@example.test', password: 'Another-Passphrase-77' });
+    eq(r.status, 409);
+    const sess = await fetch(B2 + '/api/auth/session').then(x => x.json());
+    eq(sess.setupAvailable, false);
+  });
+  await t('the chosen password works for a later sign-in', async () => {
+    ck = null;
+    const r = await call('/api/auth/login', { email: 'me@example.test', password: GOOD });
+    eq(r.status, 200);
+  });
+  app2.server.close();
+}
 
 await t('a weak bootstrap password is refused with the requirement explained', async () => {
   // A stand-in with the same shape as a weak password: digits + lowercase only.

@@ -1413,11 +1413,14 @@ function showGate(view, opts) {
   document.body.classList.add('locked');
   $('#loginForm').hidden = view !== 'login';
   $('#pwForm').hidden = view !== 'password';
+  $('#setupForm').hidden = view !== 'setup';
   $('#authBlocked').hidden = view !== 'blocked';
   $('#authHeading').textContent =
-    view === 'password' ? 'New password' : view === 'blocked' ? 'No access' : 'Sign in';
+    view === 'password' ? 'New password' : view === 'blocked' ? 'No access'
+    : view === 'setup' ? 'Set up your account' : 'Sign in';
   $('#authSub').textContent =
     view === 'password' ? 'This replaces the temporary password you were given.'
+    : view === 'setup' ? 'First time only. Use your owner email and choose your own password.'
     : view === 'blocked' ? ''
     : 'Your training data is private to your account.';
   if (view === 'blocked') $('#authBlockedMsg').textContent = opts.message || '';
@@ -1449,6 +1452,22 @@ $('#loginForm').addEventListener('submit', async e => {
     errEl.textContent = 'Could not reach the server. Check your connection.';
     errEl.hidden = false;
   } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+});
+
+$('#setupForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const errEl = $('#setupError'); errEl.hidden = true;
+  const pw = $('#setupPw').value;
+  if (pw !== $('#setupConfirm').value) { errEl.textContent = 'The two passwords do not match.'; errEl.hidden = false; return; }
+  const btn = $('#setupBtn'); btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const r = await AUTH.setup($('#setupEmail').value.trim(), pw);
+    if (!r.ok) { errEl.textContent = r.error; errEl.hidden = false; return; }
+    $('#setupPw').value = $('#setupConfirm').value = '';
+    await afterSignIn(r.user);
+  } catch (e2) {
+    errEl.textContent = 'Could not reach the server. Check your connection.'; errEl.hidden = false;
+  } finally { btn.disabled = false; btn.textContent = 'Create my account'; }
 });
 
 $('#pwForm').addEventListener('submit', async e => {
@@ -1594,7 +1613,7 @@ async function resolveSession() {
     showGate('login', { foot: r.message });
     return { mode: 'gate' };
   }
-  if (r.state === 'anonymous') { showGate('login'); return { mode: 'gate' }; }
+  if (r.state === 'anonymous') { showGate(r.setupAvailable ? 'setup' : 'login'); return { mode: 'gate' }; }
   if (r.state === 'no_backend') return { mode: 'local' };   // static deploy, no accounts
   return { mode: 'local' };
 }

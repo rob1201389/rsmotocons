@@ -8,7 +8,7 @@
    3. skipWaiting() ran unconditionally, so deploying mid-workout could swap the
       running code. The new worker waits, and activates only when the page says
       it is safe. */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE_PREFIX = 'recomp-';
 const CACHE = CACHE_PREFIX + VERSION;
 
