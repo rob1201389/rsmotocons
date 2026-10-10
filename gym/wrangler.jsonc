@@ -20,6 +20,6 @@
   // first deploy and reuses it afterwards. Needs D1 Edit on the API token.
   // Login name the owner may claim on first visit (not secret; the owner picks
   // the password in the app). Not an email.
-  "vars": { "OWNER_LOGIN": "RS Motocons" },
+  "vars": { "OWNER_LOGIN": "rsmotocons" },
   "d1_databases": [{ "binding": "DB", "database_name": "recomp" }]
 }
